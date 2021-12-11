@@ -1,0 +1,6 @@
+/target
+/out
+/neardev
+
+Cargo.lock
+/.idea
