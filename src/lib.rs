@@ -1,6 +1,6 @@
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{
-    env, near_bindgen, Gas, setup_alloc, promise_result_as_success,
+    env, near_bindgen, Gas, promise_result_as_success,
     serde_json::json, AccountId, Promise, Balance,
 };
 use near_sdk::json_types::U128;
@@ -34,9 +34,9 @@ trait ExtSelf {
     ) -> Promise;
 }
 
-const GAS_FOR_NFT_TRANSFER: Gas = 20_000_000_000_000;
-const BASE_GAS: Gas = 5_000_000_000_000;
-const GAS_FOR_ROYALTIES: Gas = BASE_GAS * 10u64;
+const GAS_FOR_NFT_TRANSFER: Gas = Gas(20_000_000_000_000);
+const BASE_GAS: Gas = Gas(5_000_000_000_000);
+const GAS_FOR_ROYALTIES: Gas = Gas(BASE_GAS.0 * 10u64);
 const NO_DEPOSIT: Balance = 0;
 
 // 200 /10_000 = 0.02
@@ -50,10 +50,6 @@ pub type Payout = HashMap<AccountId, U128>;
 pub struct PayoutStruct {
     pub payout: Payout,
 }
-
-
-
-setup_alloc!();
 
 
 #[near_bindgen]
@@ -86,6 +82,15 @@ impl Contract {
         //TODO
     }
 
+//    #[payable]
+//    pub fn buy(
+//        &mut self,
+//        nft_contract_id: AccountId,
+//        token_id: TokenId,
+//    ) {
+//
+//    }
+
     #[payable]
     pub fn buy_with_payouts(
         &mut self,
@@ -94,9 +99,9 @@ impl Contract {
     ) {
         //Get info about NFT
         //TODO
-        let cur_approval_id: u64 = 6; //hardcoded
+        let cur_approval_id: u64 = 1; //hardcoded
         let cur_price: U128 = U128(20000000000000000000000); //hardcoded 0.02NEAR
-        let seller_id = String::from("a77.near");
+        let seller_id = AccountId::new_unchecked("turk.near".to_string());
 
         //Delete info about NFT from market
         //TODO
@@ -109,14 +114,14 @@ impl Contract {
             Some(cur_approval_id), // approval_id: Option<u64>,
             Some(cur_price),       // balance: Option<U128>,
             Some(10u32),           // max_len_payout: Option<u32>
-            &nft_contract_id,
+            nft_contract_id,
             1,
             GAS_FOR_NFT_TRANSFER,
         ).then(ext_self::resolve_purchase(
             buyer_id,
             seller_id,
             cur_price,
-            &env::current_account_id(),
+            env::current_account_id(),
             NO_DEPOSIT,
             GAS_FOR_ROYALTIES,
         ));
@@ -125,7 +130,7 @@ impl Contract {
     #[private]
     fn check_payouts(
         price: U128,
-        payout: Payout
+        payout: Payout,
     ) -> Option<Payout> {
         let mut remainder = price.0;
         for &value in payout.values() {
@@ -161,7 +166,6 @@ impl Contract {
                     Contract::check_payouts(price, payout)
                 })
             }
-
         });
 
         let payout = if let Some(payout_option) = payout_option {
@@ -169,14 +173,14 @@ impl Contract {
         } else {
             Promise::new(buyer_id.clone()).transfer(u128::from(price));
 
-            env::log(
+            env::log_str(
                 &json!({
                     "type": "resolve_purchase_fail",
                     "params": {
                         "price": price,
                         "buyer_id": buyer_id
                     }
-                }).to_string().as_bytes()
+                }).to_string()
             );
             return;
         };
@@ -187,19 +191,19 @@ impl Contract {
         for (receiver_id, amount) in payout {
             if receiver_id == seller_id {
                 Promise::new(receiver_id).transfer(amount.0 - treasury_fee);
-                Promise::new(TREASURY_ID.to_string()).transfer(treasury_fee);
+                Promise::new(AccountId::new_unchecked(TREASURY_ID.to_string())).transfer(treasury_fee);
             } else {
                 Promise::new(receiver_id).transfer(amount.0);
             }
         }
-        env::log(
+        env::log_str(
             &json!({
                 "type": "resolve_purchase",
                 "params": {
                     "price": price,
                     "buyer_id": buyer_id,
                 }
-            }).to_string().as_bytes()
+            }).to_string()
         );
     }
 }

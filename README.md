@@ -41,5 +41,5 @@ This will output on the contract ID it deployed.
 
 To deploy to Mainnet, you can use next command:
 ```
-near deploy marketplace.near --nodeUrl https://rpc.mainnet.near.org --networkId mainnet --explorerUrl https://explorer.mainnet.near.org --helperUrl https://helper.mainnet.near.org
+near deploy jpn.near --accountId jpn.near
 ```
