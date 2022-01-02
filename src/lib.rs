@@ -39,8 +39,7 @@ const BASE_GAS: Gas = Gas(5_000_000_000_000);
 const GAS_FOR_ROYALTIES: Gas = Gas(BASE_GAS.0 * 10u64);
 const NO_DEPOSIT: Balance = 0;
 
-// 200 /10_000 = 0.02
-const TREASURY_FEE: u128 = 200;
+const TREASURY_FEE: u128 = 200; // 0.02
 const TREASURY_ID: &str = "8o8.near";
 
 pub type Payout = HashMap<AccountId, U128>;
@@ -48,7 +47,7 @@ pub type Payout = HashMap<AccountId, U128>;
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct PayoutStruct {
-    pub payout: Payout,
+    pub payout: Payout
 }
 
 
@@ -56,6 +55,22 @@ pub struct PayoutStruct {
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Contract {
     records: LookupMap<String, String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct MarketArgs {
+    pub price: U128
+}
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct TokenData {
+    pub owner_id: AccountId,
+    pub nft_contract_id: AccountId,
+    pub token_id: TokenId,
+    pub price: u128,
+    pub approval_id: u64,
 }
 
 impl Default for Contract {
@@ -76,10 +91,19 @@ impl Contract {
         approval_id: u64,
         msg: String,
     ) {
-        assert_eq!(env::signer_account_id(), owner_id);
+        assert_eq!(env::signer_account_id(), owner_id, "You are not the owner of NFT");
 
-        //Add info about NFT to market (to our Contract struct)
+        let nft_contract_id = env::predecessor_account_id();
+        assert_ne!(env::signer_account_id(), nft_contract_id, "Cross contract call awaited");
+
+        let MarketArgs {
+            price
+        } = near_sdk::serde_json::from_str(&msg).expect("Not valid MarketArgs");
+
+
+        //Add TokenData info to Contract
         //TODO
+
     }
 
 //    #[payable]
