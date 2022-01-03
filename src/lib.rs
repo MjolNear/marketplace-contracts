@@ -1,15 +1,12 @@
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::{
-    env, near_bindgen, Gas, promise_result_as_success,
-    serde_json::json, AccountId, Promise, Balance,
-};
-use near_sdk::json_types::U128;
-use near_sdk::collections::LookupMap;
+use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey};
+use near_sdk::collections::{LookupMap, TreeMap, UnorderedSet};
 use std::collections::HashMap;
 use near_sdk::serde::{Deserialize, Serialize};
 
 use near_sdk::ext_contract;
-use near_contract_standards::non_fungible_token::TokenId;
+use near_contract_standards::non_fungible_token::{hash_account_id, TokenId};
+use near_sdk::json_types::U128;
 
 
 #[ext_contract(nft_contract)]
@@ -39,28 +36,44 @@ const BASE_GAS: Gas = Gas(5_000_000_000_000);
 const GAS_FOR_ROYALTIES: Gas = Gas(BASE_GAS.0 * 10u64);
 const NO_DEPOSIT: Balance = 0;
 
-const TREASURY_FEE: u128 = 200; // 0.02
+const TREASURY_FEE: u128 = 200;
+// 0.02
 const TREASURY_ID: &str = "8o8.near";
 
+const UID_DELIMITER: &str = ":";
+
 pub type Payout = HashMap<AccountId, U128>;
+pub type TokenUID = String;
+pub type OrderUID = u128;
+
+#[derive(BorshSerialize, BorshStorageKey)]
+enum StorageKey {
+    Listings,
+    TokenUIDToData,
+    OwnedOrderUIDs,
+    OwnedOrderUIDsInner { account_id_hash: CryptoHash },
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct PayoutStruct {
-    pub payout: Payout
+    pub payout: Payout,
 }
 
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Contract {
-    records: LookupMap<String, String>,
+    listings: TreeMap<OrderUID, TokenUID>,
+    uid_to_data: LookupMap<TokenUID, TokenData>,
+    user_to_uids: LookupMap<AccountId, UnorderedSet<OrderUID>>,
+    next_order: OrderUID,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct MarketArgs {
-    pub price: U128
+    pub price: U128,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
@@ -71,18 +84,32 @@ pub struct TokenData {
     pub token_id: TokenId,
     pub price: u128,
     pub approval_id: u64,
+    pub order_id: OrderUID,
 }
 
 impl Default for Contract {
     fn default() -> Self {
         Self {
-            records: LookupMap::new(b"a".to_vec()),
+            listings: TreeMap::new(StorageKey::Listings),
+            uid_to_data: LookupMap::new(StorageKey::TokenUIDToData),
+            user_to_uids: LookupMap::new(StorageKey::OwnedOrderUIDs),
+            next_order: 0u128,
         }
     }
 }
 
 #[near_bindgen]
 impl Contract {
+    #[init]
+    pub fn new() -> Self {
+        Self {
+            listings: TreeMap::new(StorageKey::Listings),
+            uid_to_data: LookupMap::new(StorageKey::TokenUIDToData),
+            user_to_uids: LookupMap::new(StorageKey::OwnedOrderUIDs),
+            next_order: 0u128,
+        }
+    }
+
     #[payable]
     pub fn nft_on_approve(
         &mut self,
@@ -101,9 +128,49 @@ impl Contract {
         } = near_sdk::serde_json::from_str(&msg).expect("Not valid MarketArgs");
 
 
-        //Add TokenData info to Contract
-        //TODO
+        let new_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
+        let new_order = self.get_and_inc_order();
 
+        // update users listing info
+        let mut cur_users_order_uids = self
+            .user_to_uids
+            .get(&owner_id.clone())
+            .unwrap_or_else(|| {
+                UnorderedSet::new(StorageKey::OwnedOrderUIDsInner {
+                    account_id_hash: hash_account_id(&owner_id.clone())
+                }.try_to_vec().unwrap()
+                )
+            });
+        assert!(cur_users_order_uids.insert(&new_order.clone()));
+        self
+            .user_to_uids
+            .insert(&owner_id.clone(), &cur_users_order_uids);
+
+        // add new listing to all listings
+        self.listings.insert(&new_order.clone(), &new_uid.clone());
+
+        // add new uid -> TokenData
+        self.uid_to_data.insert(&new_uid.clone(), &TokenData {
+            owner_id: owner_id.clone(),
+            nft_contract_id: nft_contract_id.clone(),
+            token_id: token_id.clone(),
+            price: price.0,
+            approval_id: approval_id.clone(),
+            order_id: new_order.clone(),
+        });
+
+        env::log_str(
+            &*format!("Added token {} from contract {} to the market.",
+                      token_id,
+                      nft_contract_id)
+        )
+    }
+
+    #[private]
+    fn get_and_inc_order(&mut self) -> OrderUID {
+        let order = self.next_order;
+        self.next_order += 1;
+        order
     }
 
 //    #[payable]
@@ -121,14 +188,35 @@ impl Contract {
         nft_contract_id: AccountId,
         token_id: TokenId,
     ) {
-        //Get info about NFT
-        //TODO
-        let cur_approval_id: u64 = 1; //hardcoded
-        let cur_price: U128 = U128(20000000000000000000000); //hardcoded 0.02NEAR
-        let seller_id = AccountId::new_unchecked("turk.near".to_string());
+        let nft_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
+        let nft_data = self.uid_to_data.get(&nft_uid.clone())
+            .expect("NFT does not exist.");
 
-        //Delete info about NFT from market
-        //TODO
+        let cur_approval_id: u64 = nft_data.approval_id; //hardcoded
+        let cur_price: U128 = U128::from(nft_data.price); //hardcoded 0.02NEAR
+        let seller_id = nft_data.owner_id;
+        let order_uid = nft_data.order_id;
+
+        // delete from owner's listings
+        let mut cur_users_order_uids = self
+            .user_to_uids
+            .get(&seller_id.clone())
+            .unwrap_or_else(|| {
+                UnorderedSet::new(StorageKey::OwnedOrderUIDsInner {
+                    account_id_hash: hash_account_id(&seller_id.clone())
+                }.try_to_vec().unwrap()
+                )
+            });
+        assert!(cur_users_order_uids.remove(&order_uid.clone()));
+        self
+            .user_to_uids
+            .insert(&seller_id.clone(), &cur_users_order_uids);
+
+        // delete from all listings
+        assert!(self.listings.remove(&order_uid.clone()).is_some());
+
+        // delete info about NFT
+        assert!(self.uid_to_data.remove(&nft_uid.clone()).is_some());
 
         let buyer_id = env::signer_account_id();
 
@@ -174,9 +262,6 @@ impl Contract {
         seller_id: AccountId,
         price: U128,
     ) {
-        // We need to check nft_transfer_payout is not fake function
-        // assert price = sum(payouts) etc
-        // TODO
         let payout_option = promise_result_as_success().and_then(|value| {
 
             // If Payout is struct with payout field than get it
@@ -195,7 +280,7 @@ impl Contract {
         let payout = if let Some(payout_option) = payout_option {
             payout_option
         } else {
-            Promise::new(buyer_id.clone()).transfer(u128::from(price));
+            Promise::new(seller_id.clone()).transfer(u128::from(price));
 
             env::log_str(
                 &json!({
@@ -229,5 +314,28 @@ impl Contract {
                 }
             }).to_string()
         );
+    }
+
+    pub fn get_nfts(self, from: u64, to: u64) -> Vec<TokenData> {
+        let size = self.listings.len() as u64;
+        assert!(to - from <= size);
+        let real_from = (size - to) as usize;
+        let real_to = (size - from) as usize;
+        let ret = &self.listings.to_vec()[real_from..real_to];
+        ret.iter().map(|x| self.uid_to_data.get(&x.1).unwrap()).collect()
+    }
+
+    pub fn get_user_nfts(self, owner_id: AccountId) -> Vec<(TokenUID, u128)> {
+        let order_uids = self.user_to_uids
+            .get(&owner_id.clone())
+            .expect("No listings for owner.");
+        order_uids.iter().map(|x| {
+            let token_uid = self.listings.get(&x).unwrap();
+            let data = self.uid_to_data.get(
+                &token_uid.clone()
+            ).unwrap();
+            (token_uid, data.price)
+        }
+        ).collect()
     }
 }
