@@ -41,7 +41,7 @@ const NO_DEPOSIT: Balance = 0;
 
 const TREASURY_FEE: u128 = 200;
 // 0.02
-const TREASURY_ID: &str = "8o8.near";
+const TREASURY_ID: &str = "kekmemlol.testnet";
 
 const UID_DELIMITER: &str = ":";
 
@@ -185,6 +185,8 @@ impl Contract {
         let cur_approval_id: u64 = nft_data.approval_id;
         let cur_price: U128 = U128::from(nft_data.price);
         let seller_id = nft_data.owner_id;
+
+        assert_eq!(U128::from(env::attached_deposit()), cur_price);
 
         // delete from owner's listings
         let mut cur_users_token_uids = self
