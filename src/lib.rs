@@ -1,12 +1,15 @@
+mod utils;
+
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey};
-use near_sdk::collections::{LookupMap, TreeMap, UnorderedSet};
+use near_sdk::collections::{LookupMap, Vector};
 use std::collections::HashMap;
 use near_sdk::serde::{Deserialize, Serialize};
 
 use near_sdk::ext_contract;
 use near_contract_standards::non_fungible_token::{hash_account_id, TokenId};
 use near_sdk::json_types::U128;
+use crate::utils::delete_from_vector_by_uid;
 
 
 #[ext_contract(nft_contract)]
@@ -44,14 +47,14 @@ const UID_DELIMITER: &str = ":";
 
 pub type Payout = HashMap<AccountId, U128>;
 pub type TokenUID = String;
-pub type OrderUID = u128;
+
 
 #[derive(BorshSerialize, BorshStorageKey)]
 enum StorageKey {
     Listings,
     TokenUIDToData,
-    OwnedOrderUIDs,
-    OwnedOrderUIDsInner { account_id_hash: CryptoHash },
+    TokenUIDsByOwner,
+    TokenUIDsByOwnerInner { account_id_hash: CryptoHash },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -64,10 +67,9 @@ pub struct PayoutStruct {
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Contract {
-    listings: TreeMap<OrderUID, TokenUID>,
+    listings: Vector<TokenUID>,
     uid_to_data: LookupMap<TokenUID, TokenData>,
-    user_to_uids: LookupMap<AccountId, UnorderedSet<OrderUID>>,
-    next_order: OrderUID,
+    user_to_uids: LookupMap<AccountId, Vector<TokenUID>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -84,29 +86,26 @@ pub struct TokenData {
     pub token_id: TokenId,
     pub price: u128,
     pub approval_id: u64,
-    pub order_id: OrderUID,
 }
 
 impl Default for Contract {
     fn default() -> Self {
         Self {
-            listings: TreeMap::new(StorageKey::Listings),
+            listings: Vector::new(StorageKey::Listings),
             uid_to_data: LookupMap::new(StorageKey::TokenUIDToData),
-            user_to_uids: LookupMap::new(StorageKey::OwnedOrderUIDs),
-            next_order: 0u128,
+            user_to_uids: LookupMap::new(StorageKey::TokenUIDsByOwner),
         }
     }
 }
 
 #[near_bindgen]
 impl Contract {
-    #[init]
+    #[init(ignore_state)]
     pub fn new() -> Self {
         Self {
-            listings: TreeMap::new(StorageKey::Listings),
+            listings: Vector::new(StorageKey::Listings),
             uid_to_data: LookupMap::new(StorageKey::TokenUIDToData),
-            user_to_uids: LookupMap::new(StorageKey::OwnedOrderUIDs),
-            next_order: 0u128,
+            user_to_uids: LookupMap::new(StorageKey::TokenUIDsByOwner),
         }
     }
 
@@ -129,25 +128,24 @@ impl Contract {
 
 
         let new_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
-        let new_order = self.get_and_inc_order();
 
         // update users listing info
-        let mut cur_users_order_uids = self
+        let mut cur_users_token_uids = self
             .user_to_uids
             .get(&owner_id.clone())
             .unwrap_or_else(|| {
-                UnorderedSet::new(StorageKey::OwnedOrderUIDsInner {
+                Vector::new(StorageKey::TokenUIDsByOwnerInner {
                     account_id_hash: hash_account_id(&owner_id.clone())
-                }.try_to_vec().unwrap()
+                }
                 )
             });
-        assert!(cur_users_order_uids.insert(&new_order.clone()));
+        cur_users_token_uids.push(&new_uid.clone());
         self
             .user_to_uids
-            .insert(&owner_id.clone(), &cur_users_order_uids);
+            .insert(&owner_id.clone(), &cur_users_token_uids);
 
         // add new listing to all listings
-        self.listings.insert(&new_order.clone(), &new_uid.clone());
+        self.listings.push(&new_uid.clone());
 
         // add new uid -> TokenData
         self.uid_to_data.insert(&new_uid.clone(), &TokenData {
@@ -156,7 +154,6 @@ impl Contract {
             token_id: token_id.clone(),
             price: price.0,
             approval_id: approval_id.clone(),
-            order_id: new_order.clone(),
         });
 
         env::log_str(
@@ -164,13 +161,6 @@ impl Contract {
                       token_id,
                       nft_contract_id)
         )
-    }
-
-    #[private]
-    fn get_and_inc_order(&mut self) -> OrderUID {
-        let order = self.next_order;
-        self.next_order += 1;
-        order
     }
 
 //    #[payable]
@@ -192,28 +182,27 @@ impl Contract {
         let nft_data = self.uid_to_data.get(&nft_uid.clone())
             .expect("NFT does not exist.");
 
-        let cur_approval_id: u64 = nft_data.approval_id; //hardcoded
-        let cur_price: U128 = U128::from(nft_data.price); //hardcoded 0.02NEAR
+        let cur_approval_id: u64 = nft_data.approval_id;
+        let cur_price: U128 = U128::from(nft_data.price);
         let seller_id = nft_data.owner_id;
-        let order_uid = nft_data.order_id;
 
         // delete from owner's listings
-        let mut cur_users_order_uids = self
+        let mut cur_users_token_uids = self
             .user_to_uids
             .get(&seller_id.clone())
             .unwrap_or_else(|| {
-                UnorderedSet::new(StorageKey::OwnedOrderUIDsInner {
+                Vector::new(StorageKey::TokenUIDsByOwnerInner {
                     account_id_hash: hash_account_id(&seller_id.clone())
-                }.try_to_vec().unwrap()
+                }
                 )
             });
-        assert!(cur_users_order_uids.remove(&order_uid.clone()));
+        assert!(delete_from_vector_by_uid(&mut cur_users_token_uids, &nft_uid.clone()).is_some());
         self
             .user_to_uids
-            .insert(&seller_id.clone(), &cur_users_order_uids);
+            .insert(&seller_id.clone(), &cur_users_token_uids);
 
         // delete from all listings
-        assert!(self.listings.remove(&order_uid.clone()).is_some());
+        assert!(delete_from_vector_by_uid(&mut self.listings, &nft_uid.clone()).is_some());
 
         // delete info about NFT
         assert!(self.uid_to_data.remove(&nft_uid.clone()).is_some());
@@ -280,7 +269,11 @@ impl Contract {
         let payout = if let Some(payout_option) = payout_option {
             payout_option
         } else {
-            Promise::new(seller_id.clone()).transfer(u128::from(price));
+            let treasury_fee = price.0 * TREASURY_FEE / 10_000u128;
+            Promise::new(seller_id.clone())
+                .transfer(price.0 - treasury_fee);
+            Promise::new(AccountId::new_unchecked(TREASURY_ID.to_string()))
+                .transfer(treasury_fee);
 
             env::log_str(
                 &json!({
@@ -316,26 +309,36 @@ impl Contract {
         );
     }
 
-    pub fn get_nfts(self, from: u64, to: u64) -> Vec<TokenData> {
+    pub fn get_nfts(self, from: u64, limit: u64) -> Vec<TokenData> {
         let size = self.listings.len() as u64;
-        assert!(to - from <= size);
-        let real_from = (size - to) as usize;
+        if from >= size {
+            return vec![];
+        }
+        let real_from = if limit > size {
+            0
+        } else {
+            (size - limit) as usize
+        };
         let real_to = (size - from) as usize;
-        let ret = &self.listings.to_vec()[real_from..real_to];
-        ret.iter().map(|x| self.uid_to_data.get(&x.1).unwrap()).collect()
+
+        let mut res = vec![];
+        for i in real_from..real_to {
+            res.push(self.uid_to_data
+                .get(&self.listings.get(i as u64).unwrap()).unwrap())
+        }
+        res
     }
 
     pub fn get_user_nfts(self, owner_id: AccountId) -> Vec<(TokenUID, u128)> {
-        let order_uids = self.user_to_uids
-            .get(&owner_id.clone())
-            .expect("No listings for owner.");
-        order_uids.iter().map(|x| {
-            let token_uid = self.listings.get(&x).unwrap();
-            let data = self.uid_to_data.get(
-                &token_uid.clone()
-            ).unwrap();
-            (token_uid, data.price)
+        let all_uids = self.user_to_uids
+            .get(&owner_id.clone());
+        if let Some(uids) = all_uids {
+            uids.iter().map(|x| {
+                (x.clone(), self.uid_to_data.get(&x.clone()).unwrap().price)
+            })
+                .collect()
+        } else {
+            return vec![];
         }
-        ).collect()
     }
 }
