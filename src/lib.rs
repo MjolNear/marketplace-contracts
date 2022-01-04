@@ -1,6 +1,6 @@
 mod utils;
 
-use std::cmp::min;
+use std::cmp::max;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey};
 use near_sdk::collections::{LookupMap, Vector};
@@ -317,8 +317,8 @@ impl Contract {
         if from >= size {
             return vec![];
         }
-        let real_from = (size - from - 1) as usize;
-        let real_to = min(real_from + limit, size as usize);
+        let real_to = (size - from - 1) as usize;
+        let real_from = max(real_to - limit as usize, 0 as usize);
 
         let mut res = vec![];
         for i in real_from..real_to {
