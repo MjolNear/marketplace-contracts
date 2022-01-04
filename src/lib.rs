@@ -318,10 +318,10 @@ impl Contract {
             return vec![];
         }
         let real_to = (size - from - 1) as usize;
-        let real_from = max(real_to - limit as usize, 0 as usize);
+        let real_from = max(real_to as i64 - limit as i64, 0 as i64) as usize;
 
         let mut res = vec![];
-        for i in real_from..real_to {
+        for i in (real_from..real_to).rev() {
             res.push(self.uid_to_data
                 .get(&self.listings.get(i as u64).unwrap()).unwrap())
         }
