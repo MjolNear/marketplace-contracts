@@ -3,7 +3,7 @@ mod utils;
 use std::cmp::max;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey};
-use near_sdk::collections::{LookupMap, Vector};
+use near_sdk::collections::{UnorderedMap, Vector};
 use std::collections::HashMap;
 use near_sdk::serde::{Deserialize, Serialize};
 
@@ -69,8 +69,8 @@ pub struct PayoutStruct {
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Contract {
     listings: Vector<TokenUID>,
-    uid_to_data: LookupMap<TokenUID, TokenData>,
-    user_to_uids: LookupMap<AccountId, Vector<TokenUID>>,
+    uid_to_data: UnorderedMap<TokenUID, TokenData>,
+    user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -93,8 +93,8 @@ impl Default for Contract {
     fn default() -> Self {
         Self {
             listings: Vector::new(StorageKey::Listings),
-            uid_to_data: LookupMap::new(StorageKey::TokenUIDToData),
-            user_to_uids: LookupMap::new(StorageKey::TokenUIDsByOwner),
+            uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
+            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
         }
     }
 }
@@ -105,8 +105,8 @@ impl Contract {
     pub fn new() -> Self {
         Self {
             listings: Vector::new(StorageKey::Listings),
-            uid_to_data: LookupMap::new(StorageKey::TokenUIDToData),
-            user_to_uids: LookupMap::new(StorageKey::TokenUIDsByOwner),
+            uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
+            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
         }
     }
 
@@ -320,6 +320,7 @@ impl Contract {
         let real_to = (size - from) as usize;
         let real_from = max(real_to as i64 - limit as i64, 0 as i64) as usize;
 
+        env::log_str(&*format!("{} ---- {}", real_from, real_to));
         let mut res = vec![];
         for i in (real_from..real_to).rev() {
             res.push(self.uid_to_data
