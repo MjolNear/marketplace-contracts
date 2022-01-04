@@ -317,7 +317,7 @@ impl Contract {
         if from >= size {
             return vec![];
         }
-        let real_to = (size - from - 1) as usize;
+        let real_to = (size - from) as usize;
         let real_from = max(real_to as i64 - limit as i64, 0 as i64) as usize;
 
         let mut res = vec![];
