@@ -314,11 +314,10 @@ impl Contract {
 
     pub fn get_nfts(self, from: u64, limit: u64) -> Vec<TokenData> {
         let size = self.listings.len() as u64;
-        let real_from = if size < from + 1 {
-            0
-        } else {
-            size - from - 1
-        } as usize;
+        if from >= size {
+            return vec![];
+        }
+        let real_from = (size - from - 1) as usize;
         let real_to = min(real_from + limit, size as usize);
 
         let mut res = vec![];
