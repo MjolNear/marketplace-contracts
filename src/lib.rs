@@ -1,8 +1,9 @@
 mod utils;
 
+use std::cmp::max;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey};
-use near_sdk::collections::{LookupMap, Vector};
+use near_sdk::collections::{UnorderedMap, Vector};
 use std::collections::HashMap;
 use near_sdk::serde::{Deserialize, Serialize};
 
@@ -41,7 +42,7 @@ const NO_DEPOSIT: Balance = 0;
 
 const TREASURY_FEE: u128 = 200;
 // 0.02
-const TREASURY_ID: &str = "kekmemlol.testnet";
+const TREASURY_ID: &str = "treasury1.near";
 
 const UID_DELIMITER: &str = ":";
 
@@ -68,8 +69,8 @@ pub struct PayoutStruct {
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Contract {
     listings: Vector<TokenUID>,
-    uid_to_data: LookupMap<TokenUID, TokenData>,
-    user_to_uids: LookupMap<AccountId, Vector<TokenUID>>,
+    uid_to_data: UnorderedMap<TokenUID, TokenData>,
+    user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -92,8 +93,8 @@ impl Default for Contract {
     fn default() -> Self {
         Self {
             listings: Vector::new(StorageKey::Listings),
-            uid_to_data: LookupMap::new(StorageKey::TokenUIDToData),
-            user_to_uids: LookupMap::new(StorageKey::TokenUIDsByOwner),
+            uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
+            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
         }
     }
 }
@@ -104,8 +105,8 @@ impl Contract {
     pub fn new() -> Self {
         Self {
             listings: Vector::new(StorageKey::Listings),
-            uid_to_data: LookupMap::new(StorageKey::TokenUIDToData),
-            user_to_uids: LookupMap::new(StorageKey::TokenUIDsByOwner),
+            uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
+            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
         }
     }
 
@@ -162,15 +163,6 @@ impl Contract {
                       nft_contract_id)
         )
     }
-
-//    #[payable]
-//    pub fn buy(
-//        &mut self,
-//        nft_contract_id: AccountId,
-//        token_id: TokenId,
-//    ) {
-//
-//    }
 
     #[payable]
     pub fn buy_with_payouts(
@@ -279,7 +271,7 @@ impl Contract {
 
             env::log_str(
                 &json!({
-                    "type": "resolve_purchase_fail",
+                    "type": "resolve_purchase_force",
                     "params": {
                         "price": price,
                         "buyer_id": buyer_id
@@ -316,15 +308,10 @@ impl Contract {
         if from >= size {
             return vec![];
         }
-        let real_from = if limit > size {
-            0
-        } else {
-            (size - limit) as usize
-        };
         let real_to = (size - from) as usize;
-
+        let real_from = max(real_to as i64 - limit as i64, 0 as i64) as usize;
         let mut res = vec![];
-        for i in real_from..real_to {
+        for i in (real_from..real_to).rev() {
             res.push(self.uid_to_data
                 .get(&self.listings.get(i as u64).unwrap()).unwrap())
         }
