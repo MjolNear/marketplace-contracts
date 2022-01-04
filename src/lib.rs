@@ -42,7 +42,7 @@ const NO_DEPOSIT: Balance = 0;
 
 const TREASURY_FEE: u128 = 200;
 // 0.02
-const TREASURY_ID: &str = "kekmemlol.testnet";
+const TREASURY_ID: &str = "treasury1.near";
 
 const UID_DELIMITER: &str = ":";
 
@@ -164,15 +164,6 @@ impl Contract {
         )
     }
 
-//    #[payable]
-//    pub fn buy(
-//        &mut self,
-//        nft_contract_id: AccountId,
-//        token_id: TokenId,
-//    ) {
-//
-//    }
-
     #[payable]
     pub fn buy_with_payouts(
         &mut self,
@@ -280,7 +271,7 @@ impl Contract {
 
             env::log_str(
                 &json!({
-                    "type": "resolve_purchase_fail",
+                    "type": "resolve_purchase_force",
                     "params": {
                         "price": price,
                         "buyer_id": buyer_id
@@ -319,8 +310,6 @@ impl Contract {
         }
         let real_to = (size - from) as usize;
         let real_from = max(real_to as i64 - limit as i64, 0 as i64) as usize;
-
-        env::log_str(&*format!("{} ---- {}", real_from, real_to));
         let mut res = vec![];
         for i in (real_from..real_to).rev() {
             res.push(self.uid_to_data
