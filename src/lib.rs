@@ -56,6 +56,7 @@ const NO_DEPOSIT: Balance = 0;
 const TREASURY_FEE: u128 = 200;
 // 0.02
 const TREASURY_ID: &str = "treasury1.near";
+const CONTRACT_ID: &str = "mjol.near";
 
 const UID_DELIMITER: &str = ":";
 
@@ -116,7 +117,7 @@ impl Default for Contract {
 impl Contract {
     #[init(ignore_state)]
     pub fn new() -> Self {
-        // assert predcessor_id == real owner id
+        assert_eq!(env::predecessor_account_id().to_string(), CONTRACT_ID);
         Self {
             listings: Vector::new(StorageKey::Listings),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
@@ -411,7 +412,3 @@ impl Contract {
         assert!(self.uid_to_data.remove(&nft_uid.clone()).is_some());
     }
 }
-
-// near view dev-1641228261919-83945727100058 get_nfts '{"from": 0, "limit": 20}'
-// near call dev-1641228261919-83945727100058 buy_with_payouts '{"nft_contract_id": "deadmau55.mintspace2.testnet", "token_id": "149"}' --accountId buyersea.testnet --gas 300000000000000 --deposit 1
-// near call deadmau55.mintspace2.testnet nft_approve '{"account_id": "dev-1641228261919-83945727100058", "token_id": "149", "msg": "{\"price\": \"1000000000000000000000000\"}"}' --accountId buyersea.testnet --deposit 2 --gas 300000000000000
