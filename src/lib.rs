@@ -55,7 +55,7 @@ const NO_DEPOSIT: Balance = 0;
 
 const TREASURY_FEE: u128 = 200;
 // 0.02
-const TREASURY_ID: &str = "kekmemlol.testnet";
+const TREASURY_ID: &str = "treasury1.near";
 
 const UID_DELIMITER: &str = ":";
 
@@ -340,7 +340,7 @@ impl Contract {
 
             env::log_str(
                 &json!({
-                    "type": "resolve_purchase_fail",
+                    "type": "resolve_purchase_force",
                     "params": {
                         "price": price,
                         "buyer_id": buyer_id
