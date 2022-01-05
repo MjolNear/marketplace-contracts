@@ -2,7 +2,7 @@ mod utils;
 
 use std::cmp::max;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey};
+use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey, PromiseResult};
 use near_sdk::collections::{UnorderedMap, Vector};
 use std::collections::HashMap;
 use near_sdk::serde::{Deserialize, Serialize};
@@ -23,6 +23,12 @@ trait ExtContract {
         balance: Option<U128>,
         max_len_payout: Option<u32>,
     );
+
+    // fn nft_revoke(
+    //     &mut self,
+    //     token_id: TokenId,
+    //     account_id: AccountId,
+    // );
 }
 
 #[ext_contract(ext_self)]
@@ -31,8 +37,15 @@ trait ExtSelf {
         &mut self,
         buyer_id: AccountId,
         seller_id: AccountId,
+        nft_uid: TokenUID,
         price: U128,
-    ) -> Promise;
+    );
+
+    // fn resolve_revoke(
+    //     &mut self,
+    //     owner_id: AccountId,
+    //     nft_uid: TokenUID,
+    // );
 }
 
 const GAS_FOR_NFT_TRANSFER: Gas = Gas(20_000_000_000_000);
@@ -103,6 +116,7 @@ impl Default for Contract {
 impl Contract {
     #[init(ignore_state)]
     pub fn new() -> Self {
+        // assert predcessor_id == real owner id
         Self {
             listings: Vector::new(StorageKey::Listings),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
@@ -129,6 +143,9 @@ impl Contract {
 
 
         let new_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
+
+        assert!(self.uid_to_data.get(&new_uid.clone()).is_none(),
+                "This NFT is already on the market");
 
         // update users listing info
         let mut cur_users_token_uids = self
@@ -164,14 +181,38 @@ impl Contract {
         )
     }
 
-//    #[payable]
-//    pub fn buy(
-//        &mut self,
-//        nft_contract_id: AccountId,
-//        token_id: TokenId,
-//    ) {
-//
-//    }
+    #[payable]
+    pub fn remove_from_market(
+        &mut self,
+        nft_contract_id: AccountId,
+        token_id: TokenId,
+    ) {
+        let nft_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
+        let nft_data = self.uid_to_data.get(&nft_uid.clone())
+            .expect("NFT does not exist.");
+
+        let owner_id = nft_data.owner_id;
+        let caller_id = env::signer_account_id();
+
+        assert_eq!(owner_id, caller_id);
+        // assert_eq!(env::attached_deposit(), 1);
+        //
+        // nft_contract::nft_revoke(
+        //     token_id,
+        //     env::current_account_id(),
+        //     nft_contract_id,
+        //     env::attached_deposit(),
+        //     GAS_FOR_NFT_TRANSFER,
+        // ).then(ext_self::resolve_revoke(
+        //     owner_id,
+        //     nft_uid,
+        //     env::current_account_id(),
+        //     NO_DEPOSIT,
+        //     GAS_FOR_ROYALTIES,
+        // ));
+
+        self.remove_nft(owner_id, nft_uid);
+    }
 
     #[payable]
     pub fn buy_with_payouts(
@@ -186,31 +227,10 @@ impl Contract {
         let cur_approval_id: u64 = nft_data.approval_id;
         let cur_price: U128 = U128::from(nft_data.price);
         let seller_id = nft_data.owner_id;
+        let buyer_id = env::signer_account_id();
 
         assert_eq!(U128::from(env::attached_deposit()), cur_price);
-
-        // delete from owner's listings
-        let mut cur_users_token_uids = self
-            .user_to_uids
-            .get(&seller_id.clone())
-            .unwrap_or_else(|| {
-                Vector::new(StorageKey::TokenUIDsByOwnerInner {
-                    account_id_hash: hash_account_id(&seller_id.clone())
-                }
-                )
-            });
-        assert!(delete_from_vector_by_uid(&mut cur_users_token_uids, &nft_uid.clone()).is_some());
-        self
-            .user_to_uids
-            .insert(&seller_id.clone(), &cur_users_token_uids);
-
-        // delete from all listings
-        assert!(delete_from_vector_by_uid(&mut self.listings, &nft_uid.clone()).is_some());
-
-        // delete info about NFT
-        assert!(self.uid_to_data.remove(&nft_uid.clone()).is_some());
-
-        let buyer_id = env::signer_account_id();
+        assert_ne!(seller_id, buyer_id);
 
         nft_contract::nft_transfer_payout(
             buyer_id.clone(),      // receiver_id: ValidAccountId,
@@ -224,11 +244,41 @@ impl Contract {
         ).then(ext_self::resolve_purchase(
             buyer_id,
             seller_id,
+            nft_uid,
             cur_price,
             env::current_account_id(),
             NO_DEPOSIT,
             GAS_FOR_ROYALTIES,
         ));
+    }
+
+    pub fn get_nfts(self, from: u64, limit: u64) -> Vec<TokenData> {
+        let size = self.listings.len() as u64;
+        if from >= size {
+            return vec![];
+        }
+        let real_to = (size - from) as usize;
+        let real_from = max(real_to as i64 - limit as i64, 0 as i64) as usize;
+
+        let mut res = vec![];
+        for i in (real_from..real_to).rev() {
+            res.push(self.uid_to_data
+                .get(&self.listings.get(i as u64).unwrap()).unwrap())
+        }
+        res
+    }
+
+    pub fn get_user_nfts(self, owner_id: AccountId) -> Vec<(TokenUID, u128)> {
+        let all_uids = self.user_to_uids
+            .get(&owner_id.clone());
+        if let Some(uids) = all_uids {
+            uids.iter().map(|x| {
+                (x.clone(), self.uid_to_data.get(&x.clone()).unwrap().price)
+            })
+                .collect()
+        } else {
+            return vec![];
+        }
     }
 
     #[private]
@@ -252,8 +302,18 @@ impl Contract {
         &mut self,
         buyer_id: AccountId,
         seller_id: AccountId,
+        nft_uid: TokenUID,
         price: U128,
     ) {
+        assert_eq!(env::promise_results_count(), 1);
+        match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => env::panic_str("NFT Transfer failed. Try again."),
+            PromiseResult::Successful(_) => env::log_str("Transfer OK.")
+        }
+
+        self.remove_nft(seller_id.clone(), nft_uid.clone());
+
         let payout_option = promise_result_as_success().and_then(|value| {
 
             // If Payout is struct with payout field than get it
@@ -312,33 +372,46 @@ impl Contract {
         );
     }
 
-    pub fn get_nfts(self, from: u64, limit: u64) -> Vec<TokenData> {
-        let size = self.listings.len() as u64;
-        if from >= size {
-            return vec![];
-        }
-        let real_to = (size - from) as usize;
-        let real_from = max(real_to as i64 - limit as i64, 0 as i64) as usize;
+    // #[private]
+    // pub fn resolve_revoke(
+    //     &mut self,
+    //     owner_id: AccountId,
+    //     nft_uid: TokenUID,
+    // ) {
+    //     assert_eq!(env::promise_results_count(), 1);
+    //
+    //     match env::promise_result(0) {
+    //         PromiseResult::NotReady => unreachable!(),
+    //         PromiseResult::Failed => env::panic_str("Removing of token did not succeed."),
+    //         PromiseResult::Successful(_) => { self.remove_nft(owner_id, nft_uid) }
+    //     }
+    // }
 
-        env::log_str(&*format!("{} ---- {}", real_from, real_to));
-        let mut res = vec![];
-        for i in (real_from..real_to).rev() {
-            res.push(self.uid_to_data
-                .get(&self.listings.get(i as u64).unwrap()).unwrap())
-        }
-        res
-    }
+    #[private]
+    fn remove_nft(&mut self, owner_id: AccountId, nft_uid: TokenUID) {
+        // delete from owner's listings
+        let mut cur_users_token_uids = self
+            .user_to_uids
+            .get(&owner_id.clone())
+            .unwrap_or_else(|| {
+                Vector::new(StorageKey::TokenUIDsByOwnerInner {
+                    account_id_hash: hash_account_id(&owner_id.clone())
+                }
+                )
+            });
+        assert!(delete_from_vector_by_uid(&mut cur_users_token_uids, &nft_uid.clone()).is_some());
+        self
+            .user_to_uids
+            .insert(&owner_id.clone(), &cur_users_token_uids);
 
-    pub fn get_user_nfts(self, owner_id: AccountId) -> Vec<(TokenUID, u128)> {
-        let all_uids = self.user_to_uids
-            .get(&owner_id.clone());
-        if let Some(uids) = all_uids {
-            uids.iter().map(|x| {
-                (x.clone(), self.uid_to_data.get(&x.clone()).unwrap().price)
-            })
-                .collect()
-        } else {
-            return vec![];
-        }
+        // delete from all listings
+        assert!(delete_from_vector_by_uid(&mut self.listings, &nft_uid.clone()).is_some());
+
+        // delete info about NFT
+        assert!(self.uid_to_data.remove(&nft_uid.clone()).is_some());
     }
 }
+
+// near view dev-1641228261919-83945727100058 get_nfts '{"from": 0, "limit": 20}'
+// near call dev-1641228261919-83945727100058 buy_with_payouts '{"nft_contract_id": "deadmau55.mintspace2.testnet", "token_id": "149"}' --accountId buyersea.testnet --gas 300000000000000 --deposit 1
+// near call deadmau55.mintspace2.testnet nft_approve '{"account_id": "dev-1641228261919-83945727100058", "token_id": "149", "msg": "{\"price\": \"1000000000000000000000000\"}"}' --accountId buyersea.testnet --deposit 2 --gas 300000000000000
