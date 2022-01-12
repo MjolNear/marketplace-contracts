@@ -103,6 +103,14 @@ pub struct TokenData {
     pub approval_id: u64,
 }
 
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct MarketData {
+    pub tokens: Vec<TokenData>,
+    pub has_next_batch: bool,
+    pub total_count: u64
+}
+
 impl Default for Contract {
     fn default() -> Self {
         Self {
@@ -253,33 +261,48 @@ impl Contract {
         ));
     }
 
-    pub fn get_nfts(self, from: u64, limit: u64) -> Vec<TokenData> {
+    pub fn get_nfts(self, from: u64, limit: u64) -> MarketData {
         let size = self.listings.len() as u64;
+        let mut res = vec![];
         if from >= size {
-            return vec![];
+            return MarketData {
+                tokens: res,
+                has_next_batch: false,
+                total_count: size
+            };
         }
         let real_to = (size - from) as usize;
         let real_from = max(real_to as i64 - limit as i64, 0 as i64) as usize;
 
-        let mut res = vec![];
         for i in (real_from..real_to).rev() {
             res.push(self.uid_to_data
                 .get(&self.listings.get(i as u64).unwrap()).unwrap())
         }
-        res
+         MarketData {
+            tokens: res,
+            has_next_batch: real_from > 0,
+            total_count: size
+        }
     }
 
-    pub fn get_user_nfts(self, owner_id: AccountId) -> Vec<(TokenUID, u128)> {
+    pub fn get_user_nfts(self, owner_id: AccountId) -> Vec<TokenData> {
         let all_uids = self.user_to_uids
             .get(&owner_id.clone());
         if let Some(uids) = all_uids {
             uids.iter().map(|x| {
-                (x.clone(), self.uid_to_data.get(&x.clone()).unwrap().price)
-            })
-                .collect()
+                self.uid_to_data.get(&x.clone()).unwrap()
+            }).collect()
         } else {
             return vec![];
         }
+    }
+
+    pub fn get_nft_price(self, token_uid: TokenUID) -> Option<u128> {
+        let token = self.uid_to_data.get(&token_uid);
+        if let Some(token) = token {
+            return Some(token.price)
+        }
+        None
     }
 
     #[private]

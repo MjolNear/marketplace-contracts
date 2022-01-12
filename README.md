@@ -41,5 +41,6 @@ This will output on the contract ID it deployed.
 
 To deploy to Mainnet, you can use next command:
 ```
-near deploy jpn.near --accountId jpn.near
+export NEAR_ENV=mainnet
+near deploy market.mjol.near --accountId market.mjol.near
 ```
