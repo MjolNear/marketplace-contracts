@@ -9,7 +9,7 @@ use near_sdk::serde::{Deserialize, Serialize};
 
 use near_sdk::ext_contract;
 use near_contract_standards::non_fungible_token::{hash_account_id, TokenId};
-use near_sdk::json_types::U128;
+use near_sdk::json_types::{U128, U64};
 use crate::utils::delete_from_vector_by_uid;
 
 
@@ -183,7 +183,7 @@ impl Contract {
             approval_id: approval_id.clone(),
         });
 
-        env::log_str(&*json!({
+        env::log_str(&json!({
             "type": "nft_on_approve",
             "params": {
                 "nft_contract_id": nft_contract_id,
@@ -191,7 +191,7 @@ impl Contract {
             },
             "data": {
                 "owner_id":owner_id,
-                "approval_id": approval_id,
+                "approval_id": U64::from(approval_id),
                 "price": price
             }
         }).to_string());
@@ -229,7 +229,7 @@ impl Contract {
 
         self.remove_nft(owner_id, nft_uid);
 
-        env::log_str(&*json!({
+        env::log_str(&json!({
             "type": "remove_from_market",
             "params": {
                 "nft_contract_id": nft_contract_id,
@@ -237,8 +237,8 @@ impl Contract {
             },
             "data": {
                 "owner_id": nft_data.owner_id,
-                "approval_id": nft_data.approval_id,
-                "price": nft_data.price
+                "approval_id": U64::from(nft_data.approval_id),
+                "price": U128::from(nft_data.price)
             }
         }).to_string());
     }
@@ -280,7 +280,7 @@ impl Contract {
             GAS_FOR_ROYALTIES,
         ));
 
-        env::log_str(&*json!({
+        env::log_str(&json!({
             "type": "buy_with_payouts",
             "params": {
                 "nft_contract_id": nft_contract_id,
@@ -288,8 +288,8 @@ impl Contract {
             },
             "data": {
                 "owner_id": nft_data.owner_id,
-                "approval_id": nft_data.approval_id,
-                "price": nft_data.price
+                "approval_id": U64::from(nft_data.approval_id),
+                "price": U128::from(nft_data.price)
             }
         }).to_string());
     }
@@ -312,14 +312,13 @@ impl Contract {
                 .get(&self.listings.get(i as u64).unwrap()).unwrap())
         }
 
-        env::log_str(&*json!({
+        env::log_str(&json!({
             "type": "get_nfts",
             "params": {
-                "from": from,
-                "limit": limit,
-                "tokens": res,
+                "from": U64::from(from),
+                "limit": U64::from(limit),
                 "has_next_batch": real_from > 0,
-                "total_count": size
+                "total_count": U64::from(size)
             }
         }).to_string());
 
@@ -334,52 +333,41 @@ impl Contract {
     pub fn get_user_nfts(self, owner_id: AccountId) -> Vec<TokenData> {
         let all_uids = self.user_to_uids
             .get(&owner_id.clone());
-        if let Some(uids) = all_uids {
-            let res = uids.iter().map(|x| {
+
+
+        env::log_str(&json!({
+            "type": "get_user_nfts",
+            "params": {
+                "owner_id": owner_id
+                }
+            }).to_string());
+
+
+        return if let Some(uids) = all_uids {
+            uids.iter().map(|x| {
                 self.uid_to_data.get(&x.clone()).unwrap()
-            }).collect();
-
-            env::log_str(&*json!({
-            "type": "get_user_nfts",
-            "params": {
-                "owner_id": owner_id
-                },
-                "data": {
-                    "tokens": res
-                }
-            }).to_string());
-
-            res
+            }).collect()
         } else {
-            env::log_str(&*json!({
-            "type": "get_user_nfts",
-            "params": {
-                "owner_id": owner_id
-                },
-                "data": {
-                    "tokens": []
-                }
-            }).to_string());
-            return vec![];
-        }
+            vec![]
+        };
     }
 
     pub fn get_nft_price(self, token_uid: TokenUID) -> Option<u128> {
         let token = self.uid_to_data.get(&token_uid);
         if let Some(token) = token {
-            env::log_str(&*json!({
+            env::log_str(&json!({
                 "type": "get_nft_price",
                 "params": {
                     "token_uid": token_uid
                 },
                 "data": {
-                    "price": token.price
+                    "price": U128::from(token.price.clone())
                 }
             }).to_string());
             return Some(token.price);
         }
 
-        env::log_str(&*json!({
+        env::log_str(&json!({
                 "type": "get_nft_price",
                 "params": {
                     "token_uid": token_uid
@@ -447,10 +435,10 @@ impl Contract {
                 .transfer(treasury_fee);
 
             env::log_str(
-                &*json!({
+                &json!({
                     "type": "resolve_purchase_force",
                     "params": {
-                        "price": price,
+                        "price": U128::from(price),
                         "buyer_id": buyer_id,
                         "seller_id": seller_id,
                         "nft_uid": nft_uid
@@ -472,10 +460,10 @@ impl Contract {
             }
         }
         env::log_str(
-            &*json!({
+            &json!({
                     "type": "resolve_purchase",
                     "params": {
-                        "price": price,
+                        "price": U128::from(price),
                         "buyer_id": buyer_id,
                         "seller_id": seller_id,
                         "nft_uid": nft_uid
