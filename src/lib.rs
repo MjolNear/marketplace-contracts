@@ -108,7 +108,7 @@ pub struct TokenData {
 pub struct MarketData {
     pub tokens: Vec<TokenData>,
     pub has_next_batch: bool,
-    pub total_count: u64
+    pub total_count: u64,
 }
 
 impl Default for Contract {
@@ -183,11 +183,18 @@ impl Contract {
             approval_id: approval_id.clone(),
         });
 
-        env::log_str(
-            &*format!("Added token {} from contract {} to the market.",
-                      token_id,
-                      nft_contract_id)
-        )
+        env::log_str(&*json!({
+            "type": "nft_on_approve",
+            "params": {
+                "nft_contract_id": nft_contract_id,
+                "token_id": token_id
+            },
+            "data": {
+                "owner_id":owner_id,
+                "approval_id": approval_id,
+                "price": price
+            }
+        }).to_string());
     }
 
     #[payable]
@@ -200,7 +207,7 @@ impl Contract {
         let nft_data = self.uid_to_data.get(&nft_uid.clone())
             .expect("NFT does not exist.");
 
-        let owner_id = nft_data.owner_id;
+        let owner_id = nft_data.owner_id.clone();
         let caller_id = env::signer_account_id();
 
         assert_eq!(owner_id, caller_id);
@@ -221,6 +228,19 @@ impl Contract {
         // ));
 
         self.remove_nft(owner_id, nft_uid);
+
+        env::log_str(&*json!({
+            "type": "remove_from_market",
+            "params": {
+                "nft_contract_id": nft_contract_id,
+                "token_id": token_id
+            },
+            "data": {
+                "owner_id": nft_data.owner_id,
+                "approval_id": nft_data.approval_id,
+                "price": nft_data.price
+            }
+        }).to_string());
     }
 
     #[payable]
@@ -233,9 +253,9 @@ impl Contract {
         let nft_data = self.uid_to_data.get(&nft_uid.clone())
             .expect("NFT does not exist.");
 
-        let cur_approval_id: u64 = nft_data.approval_id;
-        let cur_price: U128 = U128::from(nft_data.price);
-        let seller_id = nft_data.owner_id;
+        let cur_approval_id: u64 = nft_data.approval_id.clone();
+        let cur_price: U128 = U128::from(nft_data.price.clone());
+        let seller_id = nft_data.owner_id.clone();
         let buyer_id = env::signer_account_id();
 
         assert_eq!(U128::from(env::attached_deposit()), cur_price);
@@ -243,11 +263,11 @@ impl Contract {
 
         nft_contract::nft_transfer_payout(
             buyer_id.clone(),      // receiver_id: ValidAccountId,
-            token_id,              // token_id: TokenId,
+            token_id.clone(),              // token_id: TokenId,
             Some(cur_approval_id), // approval_id: Option<u64>,
             Some(cur_price),       // balance: Option<U128>,
             Some(10u32),           // max_len_payout: Option<u32>
-            nft_contract_id,
+            nft_contract_id.clone(),
             1,
             GAS_FOR_NFT_TRANSFER,
         ).then(ext_self::resolve_purchase(
@@ -259,6 +279,19 @@ impl Contract {
             NO_DEPOSIT,
             GAS_FOR_ROYALTIES,
         ));
+
+        env::log_str(&*json!({
+            "type": "buy_with_payouts",
+            "params": {
+                "nft_contract_id": nft_contract_id,
+                "token_id": token_id
+            },
+            "data": {
+                "owner_id": nft_data.owner_id,
+                "approval_id": nft_data.approval_id,
+                "price": nft_data.price
+            }
+        }).to_string());
     }
 
     pub fn get_nfts(self, from: u64, limit: u64) -> MarketData {
@@ -268,7 +301,7 @@ impl Contract {
             return MarketData {
                 tokens: res,
                 has_next_batch: false,
-                total_count: size
+                total_count: size,
             };
         }
         let real_to = (size - from) as usize;
@@ -278,10 +311,23 @@ impl Contract {
             res.push(self.uid_to_data
                 .get(&self.listings.get(i as u64).unwrap()).unwrap())
         }
-         MarketData {
+
+        env::log_str(&*json!({
+            "type": "get_nfts",
+            "params": {
+                "from": from,
+                "limit": limit,
+                "tokens": res,
+                "has_next_batch": real_from > 0,
+                "total_count": size
+            }
+        }).to_string());
+
+
+        MarketData {
             tokens: res,
             has_next_batch: real_from > 0,
-            total_count: size
+            total_count: size,
         }
     }
 
@@ -289,10 +335,31 @@ impl Contract {
         let all_uids = self.user_to_uids
             .get(&owner_id.clone());
         if let Some(uids) = all_uids {
-            uids.iter().map(|x| {
+            let res = uids.iter().map(|x| {
                 self.uid_to_data.get(&x.clone()).unwrap()
-            }).collect()
+            }).collect();
+
+            env::log_str(&*json!({
+            "type": "get_user_nfts",
+            "params": {
+                "owner_id": owner_id
+                },
+                "data": {
+                    "tokens": res
+                }
+            }).to_string());
+
+            res
         } else {
+            env::log_str(&*json!({
+            "type": "get_user_nfts",
+            "params": {
+                "owner_id": owner_id
+                },
+                "data": {
+                    "tokens": []
+                }
+            }).to_string());
             return vec![];
         }
     }
@@ -300,8 +367,25 @@ impl Contract {
     pub fn get_nft_price(self, token_uid: TokenUID) -> Option<u128> {
         let token = self.uid_to_data.get(&token_uid);
         if let Some(token) = token {
-            return Some(token.price)
+            env::log_str(&*json!({
+                "type": "get_nft_price",
+                "params": {
+                    "token_uid": token_uid
+                },
+                "data": {
+                    "price": token.price
+                }
+            }).to_string());
+            return Some(token.price);
         }
+
+        env::log_str(&*json!({
+                "type": "get_nft_price",
+                "params": {
+                    "token_uid": token_uid
+                },
+                "data": { }
+            }).to_string());
         None
     }
 
@@ -363,11 +447,13 @@ impl Contract {
                 .transfer(treasury_fee);
 
             env::log_str(
-                &json!({
+                &*json!({
                     "type": "resolve_purchase_force",
                     "params": {
                         "price": price,
-                        "buyer_id": buyer_id
+                        "buyer_id": buyer_id,
+                        "seller_id": seller_id,
+                        "nft_uid": nft_uid
                     }
                 }).to_string()
             );
@@ -386,13 +472,15 @@ impl Contract {
             }
         }
         env::log_str(
-            &json!({
-                "type": "resolve_purchase",
-                "params": {
-                    "price": price,
-                    "buyer_id": buyer_id,
-                }
-            }).to_string()
+            &*json!({
+                    "type": "resolve_purchase",
+                    "params": {
+                        "price": price,
+                        "buyer_id": buyer_id,
+                        "seller_id": seller_id,
+                        "nft_uid": nft_uid
+                    }
+                }).to_string()
         );
     }
 
