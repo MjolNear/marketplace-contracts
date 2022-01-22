@@ -89,8 +89,30 @@ pub struct Contract {
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
-pub struct MarketArgs {
+pub struct SiteMetadata {
+    pub name: String,
+    pub nft_link: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ApprovedNFT {
+    pub contract_id: AccountId,
+    pub token_id: TokenId,
+    pub owner_id: AccountId,
+    pub title: String,
+    pub description: Option<String>,
+    pub copies: U64,
+    pub media_url: String,
+    pub reference_url: String,
+    pub mint_site: SiteMetadata,
     pub price: U128,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct MarketArgs {
+    pub json_nft: ApprovedNFT,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
@@ -141,14 +163,16 @@ impl Contract {
         approval_id: u64,
         msg: String,
     ) {
-        assert_eq!(env::signer_account_id(), owner_id, "You are not the owner of NFT");
+        assert_eq!(env::signer_account_id(), owner_id, "You are not the owner of the NFT");
 
         let nft_contract_id = env::predecessor_account_id();
         assert_ne!(env::signer_account_id(), nft_contract_id, "Cross contract call awaited");
 
         let MarketArgs {
-            price
+            json_nft
         } = near_sdk::serde_json::from_str(&msg).expect("Not valid MarketArgs");
+
+        let price = json_nft.price;
 
 
         let new_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
@@ -184,16 +208,15 @@ impl Contract {
         });
 
         env::log_str(&json!({
-            "type": "nft_on_approve",
-            "params": {
-                "nft_contract_id": nft_contract_id,
-                "token_id": token_id
-            },
-            "data": {
-                "owner_id":owner_id,
-                "approval_id": U64::from(approval_id),
-                "price": price
-            }
+        "type": "nft_on_approve",
+        "params": {
+            "nft_contract_id": nft_contract_id,
+            "token_id": token_id,
+            "approval_id": U64::from(approval_id),
+        },
+        "data": {
+            "json_nft": json_nft
+        }
         }).to_string());
     }
 
