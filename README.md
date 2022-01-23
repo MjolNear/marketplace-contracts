@@ -44,3 +44,8 @@ To deploy to Mainnet, you can use next command:
 export NEAR_ENV=mainnet
 near deploy market.mjol.near --accountId market.mjol.near
 ```
+
+### Migrate
+```
+near call market.mjol.near migrate '{}' --accountId market.mjol.near
+```

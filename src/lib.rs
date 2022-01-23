@@ -83,8 +83,8 @@ pub struct ApprovedNFT {
     pub title: String,
     pub description: Option<String>,
     pub copies: U64,
-    pub media_url: String,
-    pub reference_url: String,
+    pub media_url: Option<String>,
+    pub reference_url: Option<String>,
     pub mint_site: SiteMetadata,
     pub price: U128,
 }
