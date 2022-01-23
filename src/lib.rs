@@ -470,6 +470,26 @@ impl Contract {
         self.whitelist.remove(&contract_id)
     }
 
+    #[init(ignore_state)]
+    #[private]
+    pub fn migrate() -> Self {
+        #[derive(BorshDeserialize)]
+        struct Old {
+            listings: Vector<TokenUID>,
+            uid_to_data: UnorderedMap<TokenUID, TokenData>,
+            user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>
+        }
+
+        let prev_state: Old = env::state_read().expect("No such state.");
+
+        Self {
+            listings: prev_state.listings,
+            uid_to_data: prev_state.uid_to_data,
+            user_to_uids: prev_state.user_to_uids,
+            whitelist: UnorderedSet::new(StorageKey::Whitelist)
+        }
+    }
+
     fn check_payouts(
         price: U128,
         payout: Payout,
