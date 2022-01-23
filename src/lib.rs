@@ -3,7 +3,7 @@ mod utils;
 use std::cmp::max;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey, PromiseResult};
-use near_sdk::collections::{UnorderedMap, Vector};
+use near_sdk::collections::{UnorderedMap, UnorderedSet, Vector};
 use std::collections::HashMap;
 use near_sdk::serde::{Deserialize, Serialize};
 
@@ -23,12 +23,6 @@ trait ExtContract {
         balance: Option<U128>,
         max_len_payout: Option<u32>,
     );
-
-    // fn nft_revoke(
-    //     &mut self,
-    //     token_id: TokenId,
-    //     account_id: AccountId,
-    // );
 }
 
 #[ext_contract(ext_self)]
@@ -40,12 +34,6 @@ trait ExtSelf {
         nft_uid: TokenUID,
         price: U128,
     );
-
-    // fn resolve_revoke(
-    //     &mut self,
-    //     owner_id: AccountId,
-    //     nft_uid: TokenUID,
-    // );
 }
 
 const GAS_FOR_NFT_TRANSFER: Gas = Gas(20_000_000_000_000);
@@ -70,21 +58,13 @@ enum StorageKey {
     TokenUIDToData,
     TokenUIDsByOwner,
     TokenUIDsByOwnerInner { account_id_hash: CryptoHash },
+    Whitelist
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct PayoutStruct {
     pub payout: Payout,
-}
-
-
-#[near_bindgen]
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct Contract {
-    listings: Vector<TokenUID>,
-    uid_to_data: UnorderedMap<TokenUID, TokenData>,
-    user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -125,6 +105,15 @@ pub struct TokenData {
     pub approval_id: u64,
 }
 
+#[near_bindgen]
+#[derive(BorshDeserialize, BorshSerialize)]
+pub struct Contract {
+    listings: Vector<TokenUID>,
+    uid_to_data: UnorderedMap<TokenUID, TokenData>,
+    user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>,
+    whitelist: UnorderedSet<AccountId>
+}
+
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct MarketData {
@@ -139,6 +128,7 @@ impl Default for Contract {
             listings: Vector::new(StorageKey::Listings),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
             user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
+            whitelist: UnorderedSet::new(StorageKey::Whitelist)
         }
     }
 }
@@ -152,6 +142,7 @@ impl Contract {
             listings: Vector::new(StorageKey::Listings),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
             user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
+            whitelist: UnorderedSet::new(StorageKey::Whitelist)
         }
     }
 
@@ -234,21 +225,6 @@ impl Contract {
         let caller_id = env::signer_account_id();
 
         assert_eq!(owner_id, caller_id);
-        // assert_eq!(env::attached_deposit(), 1);
-        //
-        // nft_contract::nft_revoke(
-        //     token_id,
-        //     env::current_account_id(),
-        //     nft_contract_id,
-        //     env::attached_deposit(),
-        //     GAS_FOR_NFT_TRANSFER,
-        // ).then(ext_self::resolve_revoke(
-        //     owner_id,
-        //     nft_uid,
-        //     env::current_account_id(),
-        //     NO_DEPOSIT,
-        //     GAS_FOR_ROYALTIES,
-        // ));
 
         self.remove_nft(owner_id, nft_uid);
 
@@ -286,7 +262,7 @@ impl Contract {
 
         nft_contract::nft_transfer_payout(
             buyer_id.clone(),      // receiver_id: ValidAccountId,
-            token_id.clone(),              // token_id: TokenId,
+            token_id.clone(),      // token_id: TokenId,
             Some(cur_approval_id), // approval_id: Option<u64>,
             Some(cur_price),       // balance: Option<U128>,
             Some(10u32),           // max_len_payout: Option<u32>
@@ -400,20 +376,8 @@ impl Contract {
         None
     }
 
-    #[private]
-    fn check_payouts(
-        price: U128,
-        payout: Payout,
-    ) -> Option<Payout> {
-        let mut remainder = price.0;
-        for &value in payout.values() {
-            remainder = remainder.checked_sub(value.0)?;
-        }
-        if remainder == 0 || remainder == 1 {
-            Some(payout)
-        } else {
-            None
-        }
+    pub fn get_whitelist(&self) -> Vec<AccountId> {
+        self.whitelist.to_vec()
     }
 
     #[private]
@@ -495,22 +459,32 @@ impl Contract {
         );
     }
 
-    // #[private]
-    // pub fn resolve_revoke(
-    //     &mut self,
-    //     owner_id: AccountId,
-    //     nft_uid: TokenUID,
-    // ) {
-    //     assert_eq!(env::promise_results_count(), 1);
-    //
-    //     match env::promise_result(0) {
-    //         PromiseResult::NotReady => unreachable!(),
-    //         PromiseResult::Failed => env::panic_str("Removing of token did not succeed."),
-    //         PromiseResult::Successful(_) => { self.remove_nft(owner_id, nft_uid) }
-    //     }
-    // }
 
     #[private]
+    pub fn add_to_whitelist(&mut self, contract_id : AccountId) {
+        self.whitelist.insert(&contract_id);
+    }
+
+    #[private]
+    pub fn remove_from_whitelist(&mut self, contract_id : AccountId) -> bool {
+        self.whitelist.remove(&contract_id)
+    }
+
+    fn check_payouts(
+        price: U128,
+        payout: Payout,
+    ) -> Option<Payout> {
+        let mut remainder = price.0;
+        for &value in payout.values() {
+            remainder = remainder.checked_sub(value.0)?;
+        }
+        if remainder == 0 || remainder == 1 {
+            Some(payout)
+        } else {
+            None
+        }
+    }
+
     fn remove_nft(&mut self, owner_id: AccountId, nft_uid: TokenUID) {
         // delete from owner's listings
         let mut cur_users_token_uids = self
