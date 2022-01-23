@@ -80,7 +80,6 @@ pub struct PayoutStruct {
     pub payout: Payout,
 }
 
-
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Contract {
