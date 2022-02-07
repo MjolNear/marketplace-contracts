@@ -1,12 +1,12 @@
 mod utils;
 mod offers;
-mod whitelist;
 mod token_data;
+mod approved_nft;
 
 use std::cmp::max;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey, PromiseResult};
-use near_sdk::collections::{LookupMap, UnorderedMap, UnorderedSet, Vector};
+use near_sdk::collections::{LookupMap, UnorderedMap, Vector};
 use std::collections::HashMap;
 use near_sdk::serde::{Deserialize, Serialize};
 
@@ -16,7 +16,7 @@ use near_sdk::json_types::{U128, U64};
 use crate::offers::{Offer, OfferId};
 use crate::token_data::TokenData;
 use crate::utils::{delete_from_vector_by_offer_id, delete_from_vector_by_uid};
-use crate::whitelist::{ApprovedCollection, MarketArgs};
+use crate::approved_nft::MarketArgs;
 
 
 #[ext_contract(nft_contract)]
@@ -82,7 +82,6 @@ enum StorageKey {
     TokenUIDToData,
     TokenUIDsByOwner,
     TokenUIDsByOwnerInner { account_id_hash: CryptoHash },
-    Whitelist,
     Offers,
     OffersInner { account_id_hash: CryptoHash },
     OfferByAccountId,
@@ -263,7 +262,8 @@ impl Contract {
                        cur_approval_id,
                        cur_price,
                        seller_id,
-                       buyer_id);
+                       buyer_id,
+                       is_payouts_supported);
     }
 
     #[payable]
@@ -338,6 +338,7 @@ impl Contract {
         token_id: TokenId,
         nft_contract_id: AccountId,
         offer_id: OfferId,
+        is_payouts_supported: bool
     ) {
         let seller_id = env::predecessor_account_id();
         let nft_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
@@ -362,7 +363,8 @@ impl Contract {
                        token_data.approval_id.clone(),
                        U128::from(offer.price),
                        seller_id,
-                       offer.buyer_id.clone());
+                       offer.buyer_id.clone(),
+                       is_payouts_supported);
 
         env::log_str(&json!({
             "type": "accept_offer",
@@ -674,7 +676,8 @@ impl Contract {
                  cur_approval_id: u64,
                  cur_price: U128,
                  seller_id: AccountId,
-                 buyer_id: AccountId) {
+                 buyer_id: AccountId,
+                 is_payouts_supported: bool) {
         let nft_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
 
         assert_ne!(seller_id, buyer_id);

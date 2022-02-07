@@ -30,13 +30,3 @@ pub struct ApprovedNFT {
 pub struct MarketArgs {
     pub json_nft: ApprovedNFT,
 }
-
-#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone)]
-#[serde(crate = "near_sdk::serde")]
-pub struct ApprovedCollection {
-    pub contract_id: AccountId,
-    pub title: String,
-    pub desc: String,
-    pub media: String,
-    pub reference: Option<String>
-}
