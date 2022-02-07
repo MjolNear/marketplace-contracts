@@ -29,11 +29,27 @@ trait ExtContract {
         balance: Option<U128>,
         max_len_payout: Option<u32>,
     );
+
+    fn nft_transfer(
+        &mut self,
+        receiver_id: AccountId,
+        token_id: TokenId,
+        approval_id: Option<u64>,
+        memo: Option<String>,
+    );
 }
 
 #[ext_contract(ext_self)]
 trait ExtSelf {
     fn resolve_purchase(
+        &mut self,
+        buyer_id: AccountId,
+        seller_id: AccountId,
+        nft_uid: TokenUID,
+        price: U128,
+    );
+
+    fn resolve_purchase_no_payouts(
         &mut self,
         buyer_id: AccountId,
         seller_id: AccountId,
@@ -86,7 +102,6 @@ pub struct Contract {
     listings: Vector<TokenUID>,
     uid_to_data: UnorderedMap<TokenUID, TokenData>,
     user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>,
-    whitelist: UnorderedSet<ApprovedCollection>,
     offers: LookupMap<TokenUID, Vector<Offer>>,
     offers_by_account_id: LookupMap<AccountId, Vector<Offer>>,
     offer_id_to_account_id: LookupMap<OfferId, AccountId>,
@@ -107,7 +122,6 @@ impl Default for Contract {
             listings: Vector::new(StorageKey::Listings),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
             user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
-            whitelist: UnorderedSet::new(StorageKey::Whitelist),
             offers: LookupMap::new(StorageKey::Offers),
             offers_by_account_id: LookupMap::new(StorageKey::OfferByAccountId),
             offer_id_to_account_id: LookupMap::new(StorageKey::OfferIdToAccountId),
@@ -125,7 +139,6 @@ impl Contract {
             listings: Vector::new(StorageKey::Listings),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
             user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
-            whitelist: UnorderedSet::new(StorageKey::Whitelist),
             offers: LookupMap::new(StorageKey::Offers),
             offers_by_account_id: LookupMap::new(StorageKey::OfferByAccountId),
             offer_id_to_account_id: LookupMap::new(StorageKey::OfferIdToAccountId),
@@ -226,10 +239,11 @@ impl Contract {
     }
 
     #[payable]
-    pub fn buy_with_payouts(
+    pub fn buy(
         &mut self,
         nft_contract_id: AccountId,
         token_id: TokenId,
+        is_payouts_supported: bool
     ) {
         let nft_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
         let nft_data = self.uid_to_data.get(&nft_uid.clone())
@@ -238,10 +252,11 @@ impl Contract {
         let cur_approval_id: u64 = nft_data.approval_id.clone();
         let cur_price: U128 = U128::from(nft_data.price.clone());
         let seller_id = nft_data.owner_id.clone();
-        let buyer_id = env::signer_account_id();
+        let buyer_id = env::predecessor_account_id();
 
 
         assert_eq!(U128::from(env::attached_deposit()), cur_price);
+        assert_ne!(seller_id, buyer_id);
 
         self.buy_inner(nft_contract_id.clone(),
                        token_id.clone(),
@@ -249,17 +264,6 @@ impl Contract {
                        cur_price,
                        seller_id,
                        buyer_id);
-
-        env::log_str(&json!({
-            "type": "buy_with_payouts",
-            "data": {
-                "nft_contract_id": nft_contract_id,
-                "token_id": token_id,
-                "owner_id": nft_data.owner_id.clone(),
-                "approval_id": U64::from(nft_data.approval_id.clone()),
-                "price": U128::from(nft_data.price.clone())
-            }
-        }).to_string());
     }
 
     #[payable]
@@ -452,18 +456,6 @@ impl Contract {
         None
     }
 
-    pub fn get_whitelist(&self) -> Vec<ApprovedCollection> {
-        self.whitelist.to_vec()
-    }
-
-    pub fn get_created_offers_for_account_id(self, account_id: AccountId) -> Option<Vec<Offer>> {
-        self.offers_by_account_id.get(&account_id).map(|x| x.to_vec())
-    }
-
-    pub fn get_offers_by_token_uid(self, token_uid: TokenUID) -> Option<Vec<Offer>> {
-        self.offers.get(&token_uid).map(|x| x.to_vec())
-    }
-
     #[private]
     pub fn resolve_purchase(
         &mut self,
@@ -507,12 +499,13 @@ impl Contract {
 
             env::log_str(
                 &json!({
-                    "type": "resolve_purchase_force",
+                    "type": "resolve_purchase",
                     "data": {
                         "price": U128::from(price),
                         "buyer_id": buyer_id,
                         "seller_id": seller_id,
-                        "nft_uid": nft_uid
+                        "nft_uid": nft_uid,
+                        "payout": {}
                     }
                 }).to_string()
             );
@@ -522,7 +515,7 @@ impl Contract {
         // 2% fee for treasury
         let treasury_fee = price.0 * TREASURY_FEE / 10_000u128;
 
-        for (receiver_id, amount) in payout {
+        for (receiver_id, amount) in payout.clone() {
             if receiver_id == seller_id {
                 Promise::new(receiver_id).transfer(amount.0 - treasury_fee);
                 Promise::new(AccountId::new_unchecked(TREASURY_ID.to_string())).transfer(treasury_fee);
@@ -537,7 +530,8 @@ impl Contract {
                         "price": U128::from(price),
                         "buyer_id": buyer_id,
                         "seller_id": seller_id,
-                        "nft_uid": nft_uid
+                        "nft_uid": nft_uid,
+                        "payout": payout
                     }
                 }).to_string()
         );
@@ -545,28 +539,32 @@ impl Contract {
 
 
     #[private]
-    pub fn add_to_whitelist(&mut self, collection: ApprovedCollection) {
-        self.whitelist.insert(&collection);
+    pub fn resolve_purchase_no_payouts(&mut self, buyer_id: AccountId, seller_id: AccountId,
+                                       nft_uid: TokenUID, price: U128) {
+        assert_eq!(env::promise_results_count(), 1);
+        match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => env::panic_str("NFT Transfer failed. Try again."),
+            PromiseResult::Successful(_) => env::log_str("Transfer OK.")
+        }
+
+        self.remove_nft(seller_id.clone(), nft_uid.clone());
+
+        let treasury_fee = price.0 * TREASURY_FEE / 10_000u128;
+        Promise::new(seller_id.clone())
+            .transfer(price.0 - treasury_fee);
+        Promise::new(AccountId::new_unchecked(TREASURY_ID.to_string()))
+            .transfer(treasury_fee);
 
         env::log_str(
             &json!({
-                    "type": "add_to_whitelist",
+                    "type": "resolve_purchase",
                     "data": {
-                        "collection": collection,
-                    }
-                }).to_string()
-        );
-    }
-
-    #[private]
-    pub fn remove_from_whitelist(&mut self, collection: ApprovedCollection) {
-        self.whitelist.remove(&collection);
-
-        env::log_str(
-            &json!({
-                    "type": "remove_from_whitelist",
-                    "data": {
-                        "collection": collection,
+                        "price": U128::from(price),
+                        "buyer_id": buyer_id,
+                        "seller_id": seller_id,
+                        "nft_uid": nft_uid,
+                        "payout": {}
                     }
                 }).to_string()
         );
@@ -579,8 +577,7 @@ impl Contract {
         struct Old {
             listings: Vector<TokenUID>,
             uid_to_data: UnorderedMap<TokenUID, TokenData>,
-            user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>,
-            whitelist: UnorderedSet<ApprovedCollection>,
+            user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>
         }
 
         let prev_state: Old = env::state_read().expect("No such state.");
@@ -589,7 +586,6 @@ impl Contract {
             listings: prev_state.listings,
             uid_to_data: prev_state.uid_to_data,
             user_to_uids: prev_state.user_to_uids,
-            whitelist: prev_state.whitelist,
             offers: LookupMap::new(StorageKey::Offers),
             offers_by_account_id: LookupMap::new(StorageKey::OfferByAccountId),
             offer_id_to_account_id: LookupMap::new(StorageKey::OfferIdToAccountId),
@@ -683,24 +679,44 @@ impl Contract {
 
         assert_ne!(seller_id, buyer_id);
 
-        nft_contract::nft_transfer_payout(
-            buyer_id.clone(),      // receiver_id: ValidAccountId,
-            token_id.clone(),      // token_id: TokenId,
-            Some(cur_approval_id), // approval_id: Option<u64>,
-            Some(cur_price),       // balance: Option<U128>,
-            Some(10u32),           // max_len_payout: Option<u32>
-            nft_contract_id.clone(),
-            1,
-            GAS_FOR_NFT_TRANSFER,
-        ).then(ext_self::resolve_purchase(
-            buyer_id,
-            seller_id,
-            nft_uid,
-            cur_price,
-            env::current_account_id(),
-            NO_DEPOSIT,
-            GAS_FOR_ROYALTIES,
-        ));
+        if is_payouts_supported {
+            nft_contract::nft_transfer_payout(
+                buyer_id.clone(),      // receiver_id: ValidAccountId,
+                token_id.clone(),      // token_id: TokenId,
+                Some(cur_approval_id), // approval_id: Option<u64>,
+                Some(cur_price),       // balance: Option<U128>,
+                Some(10u32),           // max_len_payout: Option<u32>
+                nft_contract_id.clone(),
+                1,
+                GAS_FOR_NFT_TRANSFER,
+            ).then(ext_self::resolve_purchase(
+                buyer_id,
+                seller_id,
+                nft_uid,
+                cur_price,
+                env::current_account_id(),
+                NO_DEPOSIT,
+                GAS_FOR_ROYALTIES,
+            ));
+        } else {
+            nft_contract::nft_transfer(
+                buyer_id.clone(),      // receiver_id: ValidAccountId,
+                token_id.clone(),      // token_id: TokenId,
+                Some(cur_approval_id), // approval_id: Option<u64>
+                None,
+                nft_contract_id.clone(),
+                1,
+                GAS_FOR_NFT_TRANSFER,
+            ).then(ext_self::resolve_purchase_no_payouts(
+                buyer_id,
+                seller_id,
+                nft_uid,
+                cur_price,
+                env::current_account_id(),
+                NO_DEPOSIT,
+                GAS_FOR_ROYALTIES,
+            ));
+        }
     }
 
     fn remove_offer_inner(&mut self, nft_uid: TokenUID, buyer_id: AccountId, offer_id: OfferId) -> Offer {
