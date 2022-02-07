@@ -3,7 +3,7 @@ mod utils;
 use std::cmp::max;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey, PromiseResult};
-use near_sdk::collections::{UnorderedMap, UnorderedSet, Vector};
+use near_sdk::collections::{UnorderedMap, Vector};
 use std::collections::HashMap;
 use near_sdk::serde::{Deserialize, Serialize};
 
@@ -23,11 +23,27 @@ trait ExtContract {
         balance: Option<U128>,
         max_len_payout: Option<u32>,
     );
+
+    fn nft_transfer(
+        &mut self,
+        receiver_id: AccountId,
+        token_id: TokenId,
+        approval_id: Option<u64>,
+        memo: Option<String>,
+    );
 }
 
 #[ext_contract(ext_self)]
 trait ExtSelf {
     fn resolve_purchase(
+        &mut self,
+        buyer_id: AccountId,
+        seller_id: AccountId,
+        nft_uid: TokenUID,
+        price: U128,
+    );
+
+    fn resolve_purchase_no_payouts(
         &mut self,
         buyer_id: AccountId,
         seller_id: AccountId,
@@ -57,8 +73,7 @@ enum StorageKey {
     Listings,
     TokenUIDToData,
     TokenUIDsByOwner,
-    TokenUIDsByOwnerInner { account_id_hash: CryptoHash },
-    Whitelist
+    TokenUIDsByOwnerInner { account_id_hash: CryptoHash }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -110,8 +125,7 @@ pub struct TokenData {
 pub struct Contract {
     listings: Vector<TokenUID>,
     uid_to_data: UnorderedMap<TokenUID, TokenData>,
-    user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>,
-    whitelist: UnorderedSet<AccountId>
+    user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
@@ -127,8 +141,7 @@ impl Default for Contract {
         Self {
             listings: Vector::new(StorageKey::Listings),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
-            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
-            whitelist: UnorderedSet::new(StorageKey::Whitelist)
+            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner)
         }
     }
 }
@@ -141,8 +154,7 @@ impl Contract {
         Self {
             listings: Vector::new(StorageKey::Listings),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
-            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
-            whitelist: UnorderedSet::new(StorageKey::Whitelist)
+            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner)
         }
     }
 
@@ -200,13 +212,10 @@ impl Contract {
 
         env::log_str(&json!({
         "type": "nft_on_approve",
-        "params": {
+        "data": {
             "nft_contract_id": nft_contract_id,
             "token_id": token_id,
-            "approval_id": U64::from(approval_id),
-        },
-        "data": {
-            "json_nft": json_nft
+            "approval_id": U64::from(approval_id)
         }
         }).to_string());
     }
@@ -230,11 +239,9 @@ impl Contract {
 
         env::log_str(&json!({
             "type": "remove_from_market",
-            "params": {
-                "nft_contract_id": nft_contract_id,
-                "token_id": token_id
-            },
             "data": {
+                "nft_contract_id": nft_contract_id,
+                "token_id": token_id,
                 "owner_id": nft_data.owner_id,
                 "approval_id": U64::from(nft_data.approval_id),
                 "price": U128::from(nft_data.price)
@@ -243,10 +250,11 @@ impl Contract {
     }
 
     #[payable]
-    pub fn buy_with_payouts(
+    pub fn buy(
         &mut self,
         nft_contract_id: AccountId,
         token_id: TokenId,
+        is_payouts_supported: bool
     ) {
         let nft_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
         let nft_data = self.uid_to_data.get(&nft_uid.clone())
@@ -255,42 +263,49 @@ impl Contract {
         let cur_approval_id: u64 = nft_data.approval_id.clone();
         let cur_price: U128 = U128::from(nft_data.price.clone());
         let seller_id = nft_data.owner_id.clone();
-        let buyer_id = env::signer_account_id();
+        let buyer_id = env::predecessor_account_id();
 
         assert_eq!(U128::from(env::attached_deposit()), cur_price);
         assert_ne!(seller_id, buyer_id);
 
-        nft_contract::nft_transfer_payout(
-            buyer_id.clone(),      // receiver_id: ValidAccountId,
-            token_id.clone(),      // token_id: TokenId,
-            Some(cur_approval_id), // approval_id: Option<u64>,
-            Some(cur_price),       // balance: Option<U128>,
-            Some(10u32),           // max_len_payout: Option<u32>
-            nft_contract_id.clone(),
-            1,
-            GAS_FOR_NFT_TRANSFER,
-        ).then(ext_self::resolve_purchase(
-            buyer_id,
-            seller_id,
-            nft_uid,
-            cur_price,
-            env::current_account_id(),
-            NO_DEPOSIT,
-            GAS_FOR_ROYALTIES,
-        ));
-
-        env::log_str(&json!({
-            "type": "buy_with_payouts",
-            "params": {
-                "nft_contract_id": nft_contract_id,
-                "token_id": token_id
-            },
-            "data": {
-                "owner_id": nft_data.owner_id,
-                "approval_id": U64::from(nft_data.approval_id),
-                "price": U128::from(nft_data.price)
-            }
-        }).to_string());
+        if is_payouts_supported {
+            nft_contract::nft_transfer_payout(
+                buyer_id.clone(),      // receiver_id: ValidAccountId,
+                token_id.clone(),      // token_id: TokenId,
+                Some(cur_approval_id), // approval_id: Option<u64>,
+                Some(cur_price),       // balance: Option<U128>,
+                Some(10u32),           // max_len_payout: Option<u32>
+                nft_contract_id.clone(),
+                1,
+                GAS_FOR_NFT_TRANSFER,
+            ).then(ext_self::resolve_purchase(
+                buyer_id,
+                seller_id,
+                nft_uid,
+                cur_price,
+                env::current_account_id(),
+                NO_DEPOSIT,
+                GAS_FOR_ROYALTIES,
+            ));
+        } else {
+            nft_contract::nft_transfer(
+                buyer_id.clone(),      // receiver_id: ValidAccountId,
+                token_id.clone(),      // token_id: TokenId,
+                Some(cur_approval_id), // approval_id: Option<u64>
+                None,
+                nft_contract_id.clone(),
+                1,
+                GAS_FOR_NFT_TRANSFER,
+            ).then(ext_self::resolve_purchase_no_payouts(
+                buyer_id,
+                seller_id,
+                nft_uid,
+                cur_price,
+                env::current_account_id(),
+                NO_DEPOSIT,
+                GAS_FOR_ROYALTIES,
+            ));
+        }
     }
 
     pub fn get_nfts(self, from: u64, limit: u64) -> MarketData {
@@ -311,17 +326,6 @@ impl Contract {
                 .get(&self.listings.get(i as u64).unwrap()).unwrap())
         }
 
-        env::log_str(&json!({
-            "type": "get_nfts",
-            "params": {
-                "from": U64::from(from),
-                "limit": U64::from(limit),
-                "has_next_batch": real_from > 0,
-                "total_count": U64::from(size)
-            }
-        }).to_string());
-
-
         MarketData {
             tokens: res,
             has_next_batch: real_from > 0,
@@ -332,15 +336,6 @@ impl Contract {
     pub fn get_user_nfts(self, owner_id: AccountId) -> Vec<TokenData> {
         let all_uids = self.user_to_uids
             .get(&owner_id.clone());
-
-
-        env::log_str(&json!({
-            "type": "get_user_nfts",
-            "params": {
-                "owner_id": owner_id
-                }
-            }).to_string());
-
 
         return if let Some(uids) = all_uids {
             uids.iter().map(|x| {
@@ -354,30 +349,9 @@ impl Contract {
     pub fn get_nft_price(self, token_uid: TokenUID) -> Option<u128> {
         let token = self.uid_to_data.get(&token_uid);
         if let Some(token) = token {
-            env::log_str(&json!({
-                "type": "get_nft_price",
-                "params": {
-                    "token_uid": token_uid
-                },
-                "data": {
-                    "price": U128::from(token.price.clone())
-                }
-            }).to_string());
             return Some(token.price);
         }
-
-        env::log_str(&json!({
-                "type": "get_nft_price",
-                "params": {
-                    "token_uid": token_uid
-                },
-                "data": { }
-            }).to_string());
         None
-    }
-
-    pub fn get_whitelist(&self) -> Vec<AccountId> {
-        self.whitelist.to_vec()
     }
 
     #[private]
@@ -423,12 +397,13 @@ impl Contract {
 
             env::log_str(
                 &json!({
-                    "type": "resolve_purchase_force",
-                    "params": {
+                    "type": "resolve_purchase",
+                    "data": {
                         "price": U128::from(price),
                         "buyer_id": buyer_id,
                         "seller_id": seller_id,
-                        "nft_uid": nft_uid
+                        "nft_uid": nft_uid,
+                        "payout": {}
                     }
                 }).to_string()
             );
@@ -438,7 +413,7 @@ impl Contract {
         // 2% fee for treasury
         let treasury_fee = price.0 * TREASURY_FEE / 10_000u128;
 
-        for (receiver_id, amount) in payout {
+        for (receiver_id, amount) in payout.clone() {
             if receiver_id == seller_id {
                 Promise::new(receiver_id).transfer(amount.0 - treasury_fee);
                 Promise::new(AccountId::new_unchecked(TREASURY_ID.to_string())).transfer(treasury_fee);
@@ -449,25 +424,47 @@ impl Contract {
         env::log_str(
             &json!({
                     "type": "resolve_purchase",
-                    "params": {
+                    "data": {
                         "price": U128::from(price),
                         "buyer_id": buyer_id,
                         "seller_id": seller_id,
-                        "nft_uid": nft_uid
+                        "nft_uid": nft_uid,
+                        "payout": payout
                     }
                 }).to_string()
         );
     }
 
-
     #[private]
-    pub fn add_to_whitelist(&mut self, contract_id : AccountId) {
-        self.whitelist.insert(&contract_id);
-    }
+    pub fn resolve_purchase_no_payouts(&mut self, buyer_id: AccountId, seller_id: AccountId,
+                                       nft_uid: TokenUID, price: U128) {
+        assert_eq!(env::promise_results_count(), 1);
+        match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => env::panic_str("NFT Transfer failed. Try again."),
+            PromiseResult::Successful(_) => env::log_str("Transfer OK.")
+        }
 
-    #[private]
-    pub fn remove_from_whitelist(&mut self, contract_id : AccountId) -> bool {
-        self.whitelist.remove(&contract_id)
+        self.remove_nft(seller_id.clone(), nft_uid.clone());
+
+        let treasury_fee = price.0 * TREASURY_FEE / 10_000u128;
+        Promise::new(seller_id.clone())
+            .transfer(price.0 - treasury_fee);
+        Promise::new(AccountId::new_unchecked(TREASURY_ID.to_string()))
+            .transfer(treasury_fee);
+
+        env::log_str(
+            &json!({
+                    "type": "resolve_purchase",
+                    "data": {
+                        "price": U128::from(price),
+                        "buyer_id": buyer_id,
+                        "seller_id": seller_id,
+                        "nft_uid": nft_uid,
+                        "payout": {}
+                    }
+                }).to_string()
+        );
     }
 
     #[init(ignore_state)]
@@ -485,8 +482,7 @@ impl Contract {
         Self {
             listings: prev_state.listings,
             uid_to_data: prev_state.uid_to_data,
-            user_to_uids: prev_state.user_to_uids,
-            whitelist: UnorderedSet::new(StorageKey::Whitelist)
+            user_to_uids: prev_state.user_to_uids
         }
     }
 
