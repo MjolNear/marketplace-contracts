@@ -438,7 +438,11 @@ impl Contract {
             }
         }
 
-        payout[seller_id.clone()] = U128::from(payout[seller_id.clone()].0 - treasury_fee);
+        let mut log_payout = payout.clone();
+        *log_payout
+            .get_mut(&seller_id.clone()).unwrap() = U128::from(
+            log_payout[&seller_id.clone()].0 - treasury_fee
+        );
         env::log_str(
             &json!({
                     "type": "resolve_purchase",
@@ -447,7 +451,7 @@ impl Contract {
                         "buyer_id": buyer_id,
                         "seller_id": seller_id,
                         "nft_uid": nft_uid,
-                        "payout": payout
+                        "payout": log_payout
                     }
                 }).to_string()
         );
