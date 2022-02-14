@@ -408,6 +408,9 @@ impl Contract {
             Promise::new(AccountId::new_unchecked(TREASURY_ID.to_string()))
                 .transfer(treasury_fee);
 
+            let mut log_payout = Payout::new();
+            log_payout.insert(seller_id.clone(), U128::from(price.0 - treasury_fee));
+
             env::log_str(
                 &json!({
                     "type": "resolve_purchase",
@@ -416,7 +419,7 @@ impl Contract {
                         "buyer_id": buyer_id,
                         "seller_id": seller_id,
                         "nft_uid": nft_uid,
-                        "payout": {}
+                        "payout": log_payout
                     }
                 }).to_string()
             );
@@ -434,6 +437,8 @@ impl Contract {
                 Promise::new(receiver_id).transfer(amount.0);
             }
         }
+
+        payout[seller_id.clone()] = U128::from(payout[seller_id.clone()].0 - treasury_fee);
         env::log_str(
             &json!({
                     "type": "resolve_purchase",
@@ -466,6 +471,9 @@ impl Contract {
         Promise::new(AccountId::new_unchecked(TREASURY_ID.to_string()))
             .transfer(treasury_fee);
 
+        let mut log_payout = Payout::new();
+        log_payout.insert(seller_id.clone(), U128::from(price.0 - treasury_fee));
+
         env::log_str(
             &json!({
                     "type": "resolve_purchase",
@@ -474,7 +482,7 @@ impl Contract {
                         "buyer_id": buyer_id,
                         "seller_id": seller_id,
                         "nft_uid": nft_uid,
-                        "payout": {}
+                        "payout": log_payout
                     }
                 }).to_string()
         );
