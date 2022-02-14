@@ -61,6 +61,7 @@ const TREASURY_FEE: u128 = 200;
 // 0.02
 const TREASURY_ID: &str = "treasury1.near";
 const CONTRACT_ID: &str = "mjol.near";
+const REMOVER_ACCOUNT_ID: &str = "cleaner.mjol.near";
 
 const UID_DELIMITER: &str = ":";
 
@@ -215,7 +216,8 @@ impl Contract {
         "data": {
             "nft_contract_id": nft_contract_id,
             "token_id": token_id,
-            "approval_id": U64::from(approval_id)
+            "approval_id": U64::from(approval_id),
+            "json_nft": json_nft
         }
         }).to_string());
     }
@@ -305,6 +307,16 @@ impl Contract {
                 NO_DEPOSIT,
                 GAS_FOR_ROYALTIES,
             ));
+        }
+    }
+
+    #[payable]
+    pub fn remove_old_listing(&mut self, token_uid: TokenUID) {
+        assert_eq!(env::predecessor_account_id().to_string(), REMOVER_ACCOUNT_ID);
+        let token_data = self.uid_to_data.get(&token_uid.clone());
+
+        if let Some(data) = token_data {
+            self.remove_nft(data.owner_id, token_uid)
         }
     }
 
