@@ -379,7 +379,7 @@ impl Contract {
         match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => env::panic_str("NFT Transfer failed. Try again."),
-            PromiseResult::Successful(_) => env::log_str("Transfer OK.")
+            PromiseResult::Successful(_) => ()
         }
 
         self.remove_nft(seller_id.clone(), nft_uid.clone());
