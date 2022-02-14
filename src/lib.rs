@@ -10,6 +10,7 @@ use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::ext_contract;
 use near_contract_standards::non_fungible_token::{hash_account_id, TokenId};
 use near_sdk::json_types::{U128, U64};
+use near_sdk::serde_json::to_string;
 use crate::utils::delete_from_vector_by_uid;
 
 
@@ -217,7 +218,7 @@ impl Contract {
             "nft_contract_id": nft_contract_id,
             "token_id": token_id,
             "approval_id": U64::from(approval_id),
-            "json_nft": json_nft
+            "json_nft": to_string(&json_nft).unwrap()
         }
         }).to_string());
     }
