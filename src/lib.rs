@@ -93,6 +93,13 @@ pub struct SiteMetadata {
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
+pub struct CollectionMetadata {
+    pub collection_name: String,
+    pub collection_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
 pub struct ApprovedNFT {
     pub contract_id: AccountId,
     pub token_id: TokenId,
@@ -102,6 +109,7 @@ pub struct ApprovedNFT {
     pub copies: U64,
     pub media_url: Option<String>,
     pub reference_url: Option<String>,
+    pub collection_metadata: Option<CollectionMetadata>,
     pub mint_site: SiteMetadata,
     pub price: U128,
 }
