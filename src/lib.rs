@@ -75,7 +75,7 @@ enum StorageKey {
     Listings,
     TokenUIDToData,
     TokenUIDsByOwner,
-    TokenUIDsByOwnerInner { account_id_hash: CryptoHash }
+    TokenUIDsByOwnerInner { account_id_hash: CryptoHash },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -135,7 +135,7 @@ pub struct TokenData {
 pub struct Contract {
     listings: Vector<TokenUID>,
     uid_to_data: UnorderedMap<TokenUID, TokenData>,
-    user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>
+    user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
@@ -151,7 +151,7 @@ impl Default for Contract {
         Self {
             listings: Vector::new(StorageKey::Listings),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
-            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner)
+            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
         }
     }
 }
@@ -164,7 +164,7 @@ impl Contract {
         Self {
             listings: Vector::new(StorageKey::Listings),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
-            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner)
+            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
         }
     }
 
@@ -265,7 +265,7 @@ impl Contract {
         &mut self,
         nft_contract_id: AccountId,
         token_id: TokenId,
-        is_payouts_supported: bool
+        is_payouts_supported: bool,
     ) {
         let nft_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
         let nft_data = self.uid_to_data.get(&nft_uid.clone())
@@ -325,7 +325,18 @@ impl Contract {
         let token_data = self.uid_to_data.get(&token_uid.clone());
 
         if let Some(data) = token_data {
-            self.remove_nft(data.owner_id, token_uid)
+            self.remove_nft(data.owner_id.clone(), token_uid.clone());
+
+            env::log_str(&json!({
+            "type": "remove_old_listing",
+            "data": {
+                "nft_contract_id": data.nft_contract_id.clone(),
+                "token_id": data.token_id.clone(),
+                "owner_id": data.owner_id.clone(),
+                "approval_id": U64::from(data.approval_id.clone()),
+                "price": U128::from(data.price.clone())
+            }
+        }).to_string());
         } else {
             env::panic_str("Token is not on the market.")
         }
@@ -509,7 +520,7 @@ impl Contract {
         struct Old {
             listings: Vector<TokenUID>,
             uid_to_data: UnorderedMap<TokenUID, TokenData>,
-            user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>
+            user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>,
         }
 
         let prev_state: Old = env::state_read().expect("No such state.");
@@ -517,7 +528,7 @@ impl Contract {
         Self {
             listings: prev_state.listings,
             uid_to_data: prev_state.uid_to_data,
-            user_to_uids: prev_state.user_to_uids
+            user_to_uids: prev_state.user_to_uids,
         }
     }
 
