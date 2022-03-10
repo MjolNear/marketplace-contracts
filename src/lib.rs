@@ -326,6 +326,8 @@ impl Contract {
 
         if let Some(data) = token_data {
             self.remove_nft(data.owner_id, token_uid)
+        } else {
+            env::panic_str("Token is not on the market.")
         }
     }
 
