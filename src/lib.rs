@@ -101,6 +101,19 @@ pub struct CollectionMetadata {
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct ApprovedNFT {
+    pub title: String,
+    pub description: Option<String>,
+    pub copies: U64,
+    pub media_url: Option<String>,
+    pub reference_url: Option<String>,
+    pub collection_metadata: Option<CollectionMetadata>,
+    pub mint_site: SiteMetadata,
+    pub price: U128,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ApprovedNFTFull {
     pub contract_id: AccountId,
     pub token_id: TokenId,
     pub owner_id: AccountId,
@@ -111,7 +124,7 @@ pub struct ApprovedNFT {
     pub reference_url: Option<String>,
     pub collection_metadata: Option<CollectionMetadata>,
     pub mint_site: SiteMetadata,
-    pub price: U128,
+    pub price: U128
 }
 
 #[derive(Serialize, Deserialize)]
@@ -220,13 +233,27 @@ impl Contract {
             approval_id: approval_id.clone(),
         });
 
+        let full_json_nft = ApprovedNFTFull {
+            contract_id: nft_contract_id.clone(),
+            token_id: token_id.clone(),
+            owner_id: owner_id.clone(),
+            title: json_nft.title,
+            description: json_nft.description,
+            copies: json_nft.copies,
+            media_url: json_nft.media_url,
+            reference_url: json_nft.reference_url,
+            collection_metadata: json_nft.collection_metadata,
+            mint_site: json_nft.mint_site,
+            price: json_nft.price
+        };
+
         env::log_str(&json!({
         "type": "nft_on_approve",
         "data": {
             "nft_contract_id": nft_contract_id,
             "token_id": token_id,
             "approval_id": U64::from(approval_id),
-            "json_nft": to_string(&json_nft).unwrap()
+            "json_nft": to_string(&full_json_nft).unwrap()
         }
         }).to_string());
     }
