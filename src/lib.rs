@@ -299,7 +299,7 @@ impl Contract {
             .expect("NFT does not exist.");
 
         let owner_id = nft_data.owner_id.clone();
-        let caller_id = env::signer_account_id();
+        let caller_id = env::predecessor_account_id();
 
         assert_eq!(owner_id, caller_id);
 
