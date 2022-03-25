@@ -279,10 +279,11 @@ impl Contract {
         });
 
         env::log_str(&json!({
-            "type": "update_price",
+            "type": "update_token_price",
             "data": {
                 "nft_contract_id": nft_contract_id,
                 "token_id": token_id,
+                "owner_id": owner_id,
                 "price": price
             }
         }).to_string());
