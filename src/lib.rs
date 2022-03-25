@@ -124,7 +124,7 @@ pub struct ApprovedNFTFull {
     pub reference_url: Option<String>,
     pub collection_metadata: Option<CollectionMetadata>,
     pub mint_site: SiteMetadata,
-    pub price: U128
+    pub price: U128,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -244,7 +244,7 @@ impl Contract {
             reference_url: json_nft.reference_url,
             collection_metadata: json_nft.collection_metadata,
             mint_site: json_nft.mint_site,
-            price: json_nft.price
+            price: json_nft.price,
         };
 
         env::log_str(&json!({
@@ -255,6 +255,36 @@ impl Contract {
             "approval_id": U64::from(approval_id),
             "json_nft": to_string(&full_json_nft).unwrap()
         }
+        }).to_string());
+    }
+
+    #[payable]
+    pub fn update_token_price(
+        &mut self,
+        nft_contract_id: AccountId,
+        token_id: TokenId,
+        price: u128,
+    ) {
+        let nft_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
+        let nft_data = self.uid_to_data.get(&nft_uid.clone())
+            .expect("NFT does not exist.");
+
+        let owner_id = nft_data.owner_id.clone();
+        let caller_id = env::signer_account_id();
+
+        assert_eq!(owner_id, caller_id, "You are not the owner of the NFT");
+
+        self.uid_to_data.insert(&nft_uid.clone(), &TokenData {
+            price, ..nft_data
+        });
+
+        env::log_str(&json!({
+            "type": "update_price",
+            "data": {
+                "nft_contract_id": nft_contract_id,
+                "token_id": token_id,
+                "price": price
+            }
         }).to_string());
     }
 
