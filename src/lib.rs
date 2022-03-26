@@ -655,8 +655,9 @@ impl Contract {
 
         let mut prev_state: Old = env::state_read().expect("No such state.");
 
+        let users_to = min((from_user as usize) + user_bs, prev_state.user_to_uids_old.len() as usize);
         for (acc, uids) in
-        &prev_state.user_to_uids_old.to_vec()[(from_user as usize)..((from_user as usize) + user_bs)] {
+        &prev_state.user_to_uids_old.to_vec()[(from_user as usize)..users_to] {
             let mut new_uids = prev_state.user_to_uids
                 .get(&acc.clone())
                 .unwrap_or_else(|| {
@@ -669,7 +670,8 @@ impl Contract {
                                    acc.clone(),
                                    min(from_user_listing + listing_bs as u64, uids.len()),
                                    uids.len()));
-            for uid in &uids.to_vec()[(from_user_listing as usize)..((from_user_listing as usize) + listing_bs)] {
+            let uids_to = min((from_user_listing as usize) + listing_bs, uids.len() as usize);
+            for uid in &uids.to_vec()[(from_user_listing as usize)..uids_to] {
                 new_uids.insert(&uid.clone());
             }
 
@@ -703,7 +705,8 @@ impl Contract {
                               min(from + bs as u64, prev_state.listings_old.len()),
                               prev_state.listings_old.len()));
 
-        for listing in &prev_state.listings_old.to_vec()[(from as usize)..((from as usize) + bs)] {
+        let listings_to = min((from as usize) + bs, prev_state.listings_old.len() as usize);
+        for listing in &prev_state.listings_old.to_vec()[(from as usize)..listings_to] {
             prev_state.listings.insert(&listing.clone());
         }
 
