@@ -1,4 +1,4 @@
-use std::cmp::max;
+use std::cmp::{max, min};
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey, PromiseResult};
 use near_sdk::collections::{UnorderedMap, Vector, UnorderedSet};
@@ -665,6 +665,10 @@ impl Contract {
                     }
                     )
                 });
+            env::log_str(&format!("{} -> {}/{}",
+                                   acc.clone(),
+                                   min(from_user_listing + listing_bs as u64, uids.len()),
+                                   uids.len()));
             for uid in &uids.to_vec()[(from_user_listing as usize)..((from_user_listing as usize) + listing_bs)] {
                 new_uids.insert(&uid.clone());
             }
@@ -677,7 +681,7 @@ impl Contract {
             uid_to_data: prev_state.uid_to_data,
             user_to_uids: prev_state.user_to_uids,
             user_to_uids_old: prev_state.user_to_uids_old,
-            listings_old: prev_state.listings_old
+            listings_old: prev_state.listings_old,
         }
     }
 
@@ -695,6 +699,10 @@ impl Contract {
 
         let mut prev_state: Old = env::state_read().expect("No such state.");
 
+        env::log_str(&format!("LISTINGS -> {}/{}",
+                              min(from + bs as u64, prev_state.listings_old.len()),
+                              prev_state.listings_old.len()));
+
         for listing in &prev_state.listings_old.to_vec()[(from as usize)..((from as usize) + bs)] {
             prev_state.listings.insert(&listing.clone());
         }
@@ -704,7 +712,7 @@ impl Contract {
             uid_to_data: prev_state.uid_to_data,
             user_to_uids: prev_state.user_to_uids,
             user_to_uids_old: prev_state.user_to_uids_old,
-            listings_old: prev_state.listings_old
+            listings_old: prev_state.listings_old,
         }
     }
 
