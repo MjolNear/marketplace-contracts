@@ -146,6 +146,8 @@ pub struct TokenData {
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Contract {
+    listings_old: Vector<TokenUID>,
+    user_to_uids_old: UnorderedMap<AccountId, Vector<TokenUID>>,
     listings: UnorderedSet<TokenUID>,
     uid_to_data: UnorderedMap<TokenUID, TokenData>,
     user_to_uids: UnorderedMap<AccountId, UnorderedSet<TokenUID>>,
@@ -162,6 +164,8 @@ pub struct MarketData {
 impl Default for Contract {
     fn default() -> Self {
         Self {
+            listings_old: Vector::new(StorageKey::Listings),
+            user_to_uids_old: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
             listings: UnorderedSet::new(StorageKey::ListingsSet),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
             user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwnerSet),
@@ -175,6 +179,8 @@ impl Contract {
     pub fn new() -> Self {
         assert_eq!(env::predecessor_account_id().to_string(), CONTRACT_ID);
         Self {
+            listings_old: Vector::new(StorageKey::Listings),
+            user_to_uids_old: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
             listings: UnorderedSet::new(StorageKey::ListingsSet),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
             user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwnerSet),
@@ -571,9 +577,52 @@ impl Contract {
         );
     }
 
+    // #[init(ignore_state)]
+    // #[private]
+    // pub fn migrate() -> Self {
+    //     #[derive(BorshDeserialize)]
+    //     struct Old {
+    //         listings: Vector<TokenUID>,
+    //         uid_to_data: UnorderedMap<TokenUID, TokenData>,
+    //         user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>,
+    //     }
+    //
+    //     let prev_state: Old = env::state_read().expect("No such state.");
+    //
+    //     let mut new_listings: UnorderedSet<TokenUID> = UnorderedSet::new(StorageKey::ListingsSet);
+    //     let mut new_user_to_uids: UnorderedMap<AccountId, UnorderedSet<TokenUID>> =
+    //         UnorderedMap::new(StorageKey::TokenUIDsByOwnerSet);
+    //
+    //     for (acc, uids) in prev_state.user_to_uids.iter() {
+    //         let mut new_uids = new_user_to_uids
+    //             .get(&acc.clone())
+    //             .unwrap_or_else(|| {
+    //                 UnorderedSet::new(StorageKey::TokenUIDsByOwnerInnerSet {
+    //                     account_id_hash: hash_account_id(&acc.clone())
+    //                 }
+    //                 )
+    //             });
+    //         for uid in uids.iter() {
+    //             new_uids.insert(&uid.clone());
+    //         }
+    //
+    //         new_user_to_uids.insert(&acc.clone(), &new_uids);
+    //     }
+    //
+    //     for listing in prev_state.listings.iter() {
+    //         new_listings.insert(&listing.clone());
+    //     }
+    //
+    //     Self {
+    //         listings: new_listings,
+    //         uid_to_data: prev_state.uid_to_data,
+    //         user_to_uids: new_user_to_uids,
+    //     }
+    // }
+
     #[init(ignore_state)]
     #[private]
-    pub fn migrate() -> Self {
+    pub fn migrate_start() -> Self {
         #[derive(BorshDeserialize)]
         struct Old {
             listings: Vector<TokenUID>,
@@ -583,12 +632,32 @@ impl Contract {
 
         let prev_state: Old = env::state_read().expect("No such state.");
 
-        let mut new_listings: UnorderedSet<TokenUID> = UnorderedSet::new(StorageKey::ListingsSet);
-        let mut new_user_to_uids: UnorderedMap<AccountId, UnorderedSet<TokenUID>> =
-            UnorderedMap::new(StorageKey::TokenUIDsByOwnerSet);
+        Self {
+            listings: UnorderedSet::new(StorageKey::ListingsSet),
+            uid_to_data: prev_state.uid_to_data,
+            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwnerSet),
+            listings_old: prev_state.listings,
+            user_to_uids_old: prev_state.user_to_uids,
+        }
+    }
 
-        for (acc, uids) in prev_state.user_to_uids.iter() {
-            let mut new_uids = new_user_to_uids
+    #[init(ignore_state)]
+    #[private]
+    pub fn migrate_users_uids(from_user: u64, user_bs: usize, from_user_listing: u64, listing_bs: usize) -> Self {
+        #[derive(BorshDeserialize)]
+        struct Old {
+            listings_old: Vector<TokenUID>,
+            user_to_uids_old: UnorderedMap<AccountId, Vector<TokenUID>>,
+            listings: UnorderedSet<TokenUID>,
+            uid_to_data: UnorderedMap<TokenUID, TokenData>,
+            user_to_uids: UnorderedMap<AccountId, UnorderedSet<TokenUID>>,
+        }
+
+        let mut prev_state: Old = env::state_read().expect("No such state.");
+
+        for (acc, uids) in
+        &prev_state.user_to_uids_old.to_vec()[(from_user as usize)..((from_user as usize) + user_bs)] {
+            let mut new_uids = prev_state.user_to_uids
                 .get(&acc.clone())
                 .unwrap_or_else(|| {
                     UnorderedSet::new(StorageKey::TokenUIDsByOwnerInnerSet {
@@ -596,21 +665,46 @@ impl Contract {
                     }
                     )
                 });
-            for uid in uids.iter() {
+            for uid in &uids.to_vec()[(from_user_listing as usize)..((from_user_listing as usize) + listing_bs)] {
                 new_uids.insert(&uid.clone());
             }
 
-            new_user_to_uids.insert(&acc.clone(), &new_uids);
-        }
-
-        for listing in prev_state.listings.iter() {
-            new_listings.insert(&listing.clone());
+            prev_state.user_to_uids.insert(&acc.clone(), &new_uids);
         }
 
         Self {
-            listings: new_listings,
+            listings: prev_state.listings,
             uid_to_data: prev_state.uid_to_data,
-            user_to_uids: new_user_to_uids,
+            user_to_uids: prev_state.user_to_uids,
+            user_to_uids_old: prev_state.user_to_uids_old,
+            listings_old: prev_state.listings_old
+        }
+    }
+
+    #[init(ignore_state)]
+    #[private]
+    pub fn migrate_listings(from: u64, bs: usize) -> Self {
+        #[derive(BorshDeserialize)]
+        struct Old {
+            listings_old: Vector<TokenUID>,
+            user_to_uids_old: UnorderedMap<AccountId, Vector<TokenUID>>,
+            listings: UnorderedSet<TokenUID>,
+            uid_to_data: UnorderedMap<TokenUID, TokenData>,
+            user_to_uids: UnorderedMap<AccountId, UnorderedSet<TokenUID>>,
+        }
+
+        let mut prev_state: Old = env::state_read().expect("No such state.");
+
+        for listing in &prev_state.listings_old.to_vec()[(from as usize)..((from as usize) + bs)] {
+            prev_state.listings.insert(&listing.clone());
+        }
+
+        Self {
+            listings: prev_state.listings,
+            uid_to_data: prev_state.uid_to_data,
+            user_to_uids: prev_state.user_to_uids,
+            user_to_uids_old: prev_state.user_to_uids_old,
+            listings_old: prev_state.listings_old
         }
     }
 
