@@ -1,9 +1,7 @@
-mod utils;
-
 use std::cmp::max;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey, PromiseResult};
-use near_sdk::collections::{UnorderedMap, Vector};
+use near_sdk::collections::{UnorderedMap, Vector, UnorderedSet};
 use std::collections::HashMap;
 use near_sdk::serde::{Deserialize, Serialize};
 
@@ -11,7 +9,6 @@ use near_sdk::ext_contract;
 use near_contract_standards::non_fungible_token::{hash_account_id, TokenId};
 use near_sdk::json_types::{U128, U64};
 use near_sdk::serde_json::to_string;
-use crate::utils::delete_from_vector_by_uid;
 
 
 #[ext_contract(nft_contract)]
@@ -76,6 +73,9 @@ enum StorageKey {
     TokenUIDToData,
     TokenUIDsByOwner,
     TokenUIDsByOwnerInner { account_id_hash: CryptoHash },
+    ListingsSet,
+    TokenUIDsByOwnerSet,
+    TokenUIDsByOwnerInnerSet { account_id_hash: CryptoHash },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -146,9 +146,9 @@ pub struct TokenData {
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Contract {
-    listings: Vector<TokenUID>,
+    listings: UnorderedSet<TokenUID>,
     uid_to_data: UnorderedMap<TokenUID, TokenData>,
-    user_to_uids: UnorderedMap<AccountId, Vector<TokenUID>>,
+    user_to_uids: UnorderedMap<AccountId, UnorderedSet<TokenUID>>,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
@@ -162,9 +162,9 @@ pub struct MarketData {
 impl Default for Contract {
     fn default() -> Self {
         Self {
-            listings: Vector::new(StorageKey::Listings),
+            listings: UnorderedSet::new(StorageKey::ListingsSet),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
-            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
+            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwnerSet),
         }
     }
 }
@@ -175,9 +175,9 @@ impl Contract {
     pub fn new() -> Self {
         assert_eq!(env::predecessor_account_id().to_string(), CONTRACT_ID);
         Self {
-            listings: Vector::new(StorageKey::Listings),
+            listings: UnorderedSet::new(StorageKey::ListingsSet),
             uid_to_data: UnorderedMap::new(StorageKey::TokenUIDToData),
-            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwner),
+            user_to_uids: UnorderedMap::new(StorageKey::TokenUIDsByOwnerSet),
         }
     }
 
@@ -211,18 +211,18 @@ impl Contract {
             .user_to_uids
             .get(&owner_id.clone())
             .unwrap_or_else(|| {
-                Vector::new(StorageKey::TokenUIDsByOwnerInner {
+                UnorderedSet::new(StorageKey::TokenUIDsByOwnerInnerSet {
                     account_id_hash: hash_account_id(&owner_id.clone())
                 }
                 )
             });
-        cur_users_token_uids.push(&new_uid.clone());
+        cur_users_token_uids.insert(&new_uid.clone());
         self
             .user_to_uids
             .insert(&owner_id.clone(), &cur_users_token_uids);
 
         // add new listing to all listings
-        self.listings.push(&new_uid.clone());
+        self.listings.insert(&new_uid.clone());
 
         // add new uid -> TokenData
         self.uid_to_data.insert(&new_uid.clone(), &TokenData {
@@ -384,7 +384,7 @@ impl Contract {
 
         for i in (real_from..real_to).rev() {
             res.push(self.uid_to_data
-                .get(&self.listings.get(i as u64).unwrap()).unwrap())
+                .get(&self.listings.as_vector().get(i as u64).unwrap()).unwrap())
         }
 
         MarketData {
@@ -552,10 +552,34 @@ impl Contract {
 
         let prev_state: Old = env::state_read().expect("No such state.");
 
+        let mut new_listings: UnorderedSet<TokenUID> = UnorderedSet::new(StorageKey::ListingsSet);
+        let mut new_user_to_uids: UnorderedMap<AccountId, UnorderedSet<TokenUID>> =
+            UnorderedMap::new(StorageKey::TokenUIDsByOwnerSet);
+
+        for (acc, uids) in prev_state.user_to_uids.iter() {
+            let mut new_uids = new_user_to_uids
+                .get(&acc.clone())
+                .unwrap_or_else(|| {
+                    UnorderedSet::new(StorageKey::TokenUIDsByOwnerInnerSet {
+                        account_id_hash: hash_account_id(&acc.clone())
+                    }
+                    )
+                });
+            for uid in uids.iter() {
+                new_uids.insert(&uid.clone());
+            }
+
+            new_user_to_uids.insert(&acc.clone(), &new_uids);
+        }
+
+        for listing in prev_state.listings.iter() {
+            new_listings.insert(&listing.clone());
+        }
+
         Self {
-            listings: prev_state.listings,
+            listings: new_listings,
             uid_to_data: prev_state.uid_to_data,
-            user_to_uids: prev_state.user_to_uids,
+            user_to_uids: new_user_to_uids,
         }
     }
 
@@ -580,18 +604,18 @@ impl Contract {
             .user_to_uids
             .get(&owner_id.clone())
             .unwrap_or_else(|| {
-                Vector::new(StorageKey::TokenUIDsByOwnerInner {
+                UnorderedSet::new(StorageKey::TokenUIDsByOwnerInnerSet {
                     account_id_hash: hash_account_id(&owner_id.clone())
                 }
                 )
             });
-        assert!(delete_from_vector_by_uid(&mut cur_users_token_uids, &nft_uid.clone()).is_some());
+        assert!(cur_users_token_uids.remove(&nft_uid.clone()));
         self
             .user_to_uids
             .insert(&owner_id.clone(), &cur_users_token_uids);
 
         // delete from all listings
-        assert!(delete_from_vector_by_uid(&mut self.listings, &nft_uid.clone()).is_some());
+        assert!(self.listings.remove(&nft_uid.clone()));
 
         // delete info about NFT
         assert!(self.uid_to_data.remove(&nft_uid.clone()).is_some());
