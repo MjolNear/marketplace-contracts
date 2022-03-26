@@ -745,7 +745,7 @@ impl Contract {
                 }
                 )
             });
-        cur_users_token_uids.remove(&nft_uid.clone());
+        assert!(cur_users_token_uids.remove(&nft_uid.clone()));
         self
             .user_to_uids
             .insert(&owner_id.clone(), &cur_users_token_uids);
