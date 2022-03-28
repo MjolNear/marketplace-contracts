@@ -269,7 +269,7 @@ impl Contract {
         &mut self,
         nft_contract_id: AccountId,
         token_id: TokenId,
-        price: u128,
+        price: U128,
     ) {
         let nft_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
         let nft_data = self.uid_to_data.get(&nft_uid.clone())
@@ -281,7 +281,7 @@ impl Contract {
         assert_eq!(owner_id, caller_id, "You are not the owner of the NFT");
 
         self.uid_to_data.insert(&nft_uid.clone(), &TokenData {
-            price, ..nft_data
+            price: price.0, ..nft_data
         });
 
         env::log_str(&json!({
@@ -290,7 +290,7 @@ impl Contract {
                 "nft_contract_id": nft_contract_id,
                 "token_id": token_id,
                 "owner_id": owner_id,
-                "price": U128::from(price)
+                "price": price
             }
         }).to_string());
     }
