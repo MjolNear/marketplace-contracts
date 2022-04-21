@@ -1,15 +1,14 @@
 use std::cmp::{max, min};
-use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::{env, near_bindgen, Gas, promise_result_as_success, serde_json::json, AccountId, Promise, Balance, CryptoHash, BorshStorageKey, PromiseResult};
-use near_sdk::collections::{UnorderedMap, Vector, UnorderedSet};
 use std::collections::HashMap;
-use near_sdk::serde::{Deserialize, Serialize};
 
-use near_sdk::ext_contract;
 use near_contract_standards::non_fungible_token::{hash_account_id, TokenId};
+use near_sdk::{AccountId, Balance, BorshStorageKey, CryptoHash, env, Gas, near_bindgen, Promise, promise_result_as_success, PromiseResult, serde_json::json};
+use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
+use near_sdk::collections::{UnorderedMap, UnorderedSet, Vector};
+use near_sdk::ext_contract;
 use near_sdk::json_types::{U128, U64};
+use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::serde_json::to_string;
-
 
 #[ext_contract(nft_contract)]
 trait ExtContract {
@@ -86,13 +85,6 @@ pub struct PayoutStruct {
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
-pub struct SiteMetadata {
-    pub name: String,
-    pub nft_link: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(crate = "near_sdk::serde")]
 pub struct CollectionMetadata {
     pub collection_name: String,
     pub collection_id: String,
@@ -107,7 +99,6 @@ pub struct ApprovedNFT {
     pub media_url: Option<String>,
     pub reference_url: Option<String>,
     pub collection_metadata: Option<CollectionMetadata>,
-    pub mint_site: SiteMetadata,
     pub price: U128,
 }
 
@@ -123,7 +114,6 @@ pub struct ApprovedNFTFull {
     pub media_url: Option<String>,
     pub reference_url: Option<String>,
     pub collection_metadata: Option<CollectionMetadata>,
-    pub mint_site: SiteMetadata,
     pub price: U128,
 }
 
@@ -249,7 +239,6 @@ impl Contract {
             media_url: json_nft.media_url,
             reference_url: json_nft.reference_url,
             collection_metadata: json_nft.collection_metadata,
-            mint_site: json_nft.mint_site,
             price: json_nft.price,
         };
 
@@ -267,7 +256,7 @@ impl Contract {
     #[payable]
     #[private]
     pub fn verify_contract(&mut self,
-                           contract_id: ContractId,
+                           contract_id: AccountId,
                            contract_name: String,
     ) {
         env::log_str(&json!({
@@ -284,7 +273,7 @@ impl Contract {
         &mut self,
         nft_contract_id: AccountId,
         token_id: TokenId,
-        price: U128,
+        price: u128,
     ) {
         let nft_uid: TokenUID = format!("{}{}{}", nft_contract_id, UID_DELIMITER, token_id);
         let nft_data = self.uid_to_data.get(&nft_uid.clone())
@@ -296,7 +285,8 @@ impl Contract {
         assert_eq!(owner_id, caller_id, "You are not the owner of the NFT");
 
         self.uid_to_data.insert(&nft_uid.clone(), &TokenData {
-            price: price.0, ..nft_data
+            price,
+            ..nft_data
         });
 
         env::log_str(&json!({
@@ -305,7 +295,7 @@ impl Contract {
                 "nft_contract_id": nft_contract_id,
                 "token_id": token_id,
                 "owner_id": owner_id,
-                "price": price
+                "price": U128::from(price)
             }
         }).to_string());
     }
@@ -682,9 +672,9 @@ impl Contract {
                     )
                 });
             env::log_str(&format!("{} -> {}/{}",
-                                   acc.clone(),
-                                   min(from_user_listing + listing_bs as u64, uids.len()),
-                                   uids.len()));
+                                  acc.clone(),
+                                  min(from_user_listing + listing_bs as u64, uids.len()),
+                                  uids.len()));
             let uids_to = min((from_user_listing as usize) + listing_bs, uids.len() as usize);
             for uid in &uids.to_vec()[(from_user_listing as usize)..uids_to] {
                 new_uids.insert(&uid.clone());
