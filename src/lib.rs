@@ -265,6 +265,21 @@ impl Contract {
     }
 
     #[payable]
+    #[private]
+    pub fn verify_contract(&mut self,
+                           contract_id: ContractId,
+                           contract_name: String,
+    ) {
+        env::log_str(&json!({
+            "type": "verify_contract",
+            "data": {
+                "contract_id": contract_id.clone(),
+                "contract_name": contract_name.clone()
+            }
+        }).to_string())
+    }
+
+    #[payable]
     pub fn update_token_price(
         &mut self,
         nft_contract_id: AccountId,
