@@ -295,7 +295,7 @@ impl Contract {
                 "nft_contract_id": nft_contract_id,
                 "token_id": token_id,
                 "owner_id": owner_id,
-                "price": price
+                "price": U128::from(price)
             }
         }).to_string());
     }
