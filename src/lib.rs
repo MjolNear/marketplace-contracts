@@ -92,6 +92,13 @@ pub struct CollectionMetadata {
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
+pub struct TokenTrait {
+    trait_type: String,
+    value: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
 pub struct ApprovedNFT {
     pub title: String,
     pub description: Option<String>,
@@ -99,6 +106,7 @@ pub struct ApprovedNFT {
     pub media_url: Option<String>,
     pub reference_url: Option<String>,
     pub collection_metadata: Option<CollectionMetadata>,
+    pub traits: Option<Vec<TokenTrait>>,
     pub price: U128,
 }
 
@@ -114,6 +122,7 @@ pub struct ApprovedNFTFull {
     pub media_url: Option<String>,
     pub reference_url: Option<String>,
     pub collection_metadata: Option<CollectionMetadata>,
+    pub traits: Option<Vec<TokenTrait>>,
     pub price: U128,
 }
 
@@ -238,6 +247,7 @@ impl Contract {
             copies: json_nft.copies,
             media_url: json_nft.media_url,
             reference_url: json_nft.reference_url,
+            traits: json_nft.traits,
             collection_metadata: json_nft.collection_metadata,
             price: json_nft.price,
         };
